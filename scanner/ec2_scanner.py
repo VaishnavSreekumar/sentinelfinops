@@ -1,7 +1,11 @@
 import boto3
+from scanner.config import AWS_REGION
 
 def get_instances():
-    ec2 = boto3.client("ec2")
+    ec2 = boto3.client(
+        "ec2",
+        region_name=AWS_REGION
+    )
 
     response = ec2.describe_instances()
 

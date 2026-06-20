@@ -3,6 +3,8 @@
 *.tfstate
 *.tfstate.*
 .terraform.lock.hcl
+terraform.tfvars
+*.tfvars
 
 # Python
 venv/
@@ -15,3 +17,7 @@ __pycache__/
 
 # Runtime Data
 storage/*.json
+
+# Lambda Build Files
+lambda_package/
+terraform/*.zip

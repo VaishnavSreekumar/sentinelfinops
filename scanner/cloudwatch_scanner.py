@@ -1,7 +1,11 @@
 import boto3
 from datetime import datetime, timedelta, timezone
+from scanner.config import AWS_REGION
 
-cloudwatch = boto3.client("cloudwatch")
+cloudwatch = boto3.client(
+    "cloudwatch",
+    region_name=AWS_REGION
+)
 
 def get_average_cpu(instance_id):
 

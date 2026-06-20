@@ -189,7 +189,7 @@ graph LR
     end
 
     IAMPolicy -->|Grants permissions to| IAMUser
-    Note over IAMPolicy: ec2:DescribeInstances<br/>cloudwatch:GetMetricStatistics<br/>cloudtrail:LookupEvents
+    IAMPolicyNote["Permissions:<br/>- ec2:DescribeInstances<br/>- cloudwatch:GetMetricStatistics<br/>- cloudtrail:LookupEvents"] --- IAMPolicy
 ```
 
 ---
@@ -197,25 +197,24 @@ graph LR
 ### 5. Data Flow Diagram
 
 ```mermaid
-dfd
-    graph TD
-        subgraph InputStreams["Input Data Streams"]
-            AWS["☁️ AWS APIs"] -->|EC2 Describe / Tags| CLI["main.py Daemon"]
-            AWS -->|CloudWatch Metrics| CLI
-            AWS -->|CloudTrail Logs| CLI
-        end
+graph TD
+    subgraph InputStreams["Input Data Streams"]
+        AWS["☁️ AWS APIs"] -->|EC2 Describe / Tags| CLI["main.py Daemon"]
+        AWS -->|CloudWatch Metrics| CLI
+        AWS -->|CloudTrail Logs| CLI
+    end
 
-        subgraph FileReadWrite["Read/Write State Streams"]
-            CLI -->|Read/Check| Snoozes[("storage/snoozes.json")]
-            
-            Webhook["server.py Webhook API"] -->|Write Snooze Timestamp| Snoozes
-            Webhook -->|Write Log Entry| Audit[("storage/audit_log.json")]
-        end
+    subgraph FileReadWrite["Read/Write State Streams"]
+        CLI -->|Read/Check| Snoozes[("storage/snoozes.json")]
+        
+        Webhook["server.py Webhook API"] -->|Write Snooze Timestamp| Snoozes
+        Webhook -->|Write Log Entry| Audit[("storage/audit_log.json")]
+    end
 
-        subgraph OutputStreams["Output Data Streams"]
-            CLI -->|Slack Webhook Alert Payload| Slack["💬 Slack Channel"]
-            Webhook -->|JSON HTTP Response| Slack
-        end
+    subgraph OutputStreams["Output Data Streams"]
+        CLI -->|Slack Webhook Alert Payload| Slack["💬 Slack Channel"]
+        Webhook -->|JSON HTTP Response| Slack
+    end
 ```
 
 ---

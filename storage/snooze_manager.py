@@ -1,25 +1,20 @@
-import os
-import json
 from datetime import datetime, timezone
-
-SNOOZE_FILE = os.path.join(os.path.dirname(__file__), "snoozes.json")
-
-def load_snoozes():
-    if not os.path.exists(SNOOZE_FILE):
-        return {}
-    try:
-        with open(SNOOZE_FILE, "r") as f:
-            return json.load(f)
-    except Exception:
-        return {}
+import boto3
+from scanner.config import AWS_REGION, SNOOZE_TABLE
 
 def is_snoozed(instance_id):
-    snoozes = load_snoozes()
-    if instance_id not in snoozes:
-        return False
-    
-    expiry_str = snoozes[instance_id]
     try:
+        dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
+        table = dynamodb.Table(SNOOZE_TABLE)
+        response = table.get_item(Key={"instance_id": instance_id})
+        item = response.get("Item")
+        if not item:
+            return False
+        
+        expiry_str = item.get("expiry_timestamp")
+        if not expiry_str:
+            return False
+            
         expiry = datetime.fromisoformat(expiry_str)
         if expiry.tzinfo is None:
             expiry = expiry.replace(tzinfo=timezone.utc)

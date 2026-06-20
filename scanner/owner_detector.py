@@ -1,5 +1,6 @@
 import json
 import boto3
+from scanner.config import AWS_REGION
 
 def get_instance_owner(instance_id):
     """
@@ -7,7 +8,10 @@ def get_instance_owner(instance_id):
     Extract the identity of the creator (owner) and return it.
     If owner cannot be determined, return 'Unknown'.
     """
-    client = boto3.client("cloudtrail")
+    client = boto3.client(
+        "cloudtrail",
+        region_name=AWS_REGION
+    )
     try:
         response = client.lookup_events(
             LookupAttributes=[

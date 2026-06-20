@@ -135,6 +135,20 @@ sentinelfinops/
    * If the owner clicks **Snooze**: The callback registers a snooze in `snoozes.json` with an expiration set 24 hours in the future.
 7. **Snooze Enforcement**: On subsequent run loops, `main.py` queries `snooze_manager.py` before executing alerts. Since the instance is snoozed, it prints `⏰ Alert suppressed (snoozed)` to the console and skips the Slack notification.
 
+## Deployment Modes
+
+SentinelFinOps supports two operation modes depending on your target environment:
+
+### 1. Local CLI Mode
+In this mode, the platform is executed as a command-line utility. The main application is run locally or on a cron schedule on a management server.
+* **Command**: `python main.py`
+* **Flow**: Scans EC2 and CloudWatch metrics locally, triggers Slack alerts, and relies on a locally running Flask callback API (`python server.py`) to process interactive button responses.
+
+### 2. Automated AWS Mode
+In this mode, the orchestrator runs completely serverless within AWS.
+* **Infrastructure**: An EventBridge rule schedules a Lambda function (`lambda_function.py`) to execute every 1 hour.
+* **Flow**: The Lambda function imports and executes the shared `run_scan()` function, and environment variables are used to securely pass configurations (such as `SLACK_WEBHOOK_URL`).
+
 ---
 
 ## Local Setup
