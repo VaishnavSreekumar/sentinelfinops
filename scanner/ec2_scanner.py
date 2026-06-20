@@ -1,14 +1,18 @@
 import boto3
 
-ec2 = boto3.client("ec2")
+def get_instances():
+    ec2 = boto3.client("ec2")
 
-response = ec2.describe_instances()
+    response = ec2.describe_instances()
 
-print("\n=== EC2 Instances ===\n")
+    instances = []
 
-for reservation in response["Reservations"]:
-    for instance in reservation["Instances"]:
-        print(f"Instance ID: {instance['InstanceId']}")
-        print(f"State: {instance['State']['Name']}")
-        print(f"Type: {instance['InstanceType']}")
-        print("-" * 40)
+    for reservation in response["Reservations"]:
+        for instance in reservation["Instances"]:
+
+            instances.append({
+                "instance_id": instance["InstanceId"],
+                "instance_type": instance["InstanceType"]
+            })
+
+    return instances
