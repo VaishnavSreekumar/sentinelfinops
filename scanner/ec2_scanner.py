@@ -10,9 +10,17 @@ def get_instances():
     for reservation in response["Reservations"]:
         for instance in reservation["Instances"]:
 
+            instance_name = "Unknown"
+            if "Tags" in instance:
+                for tag in instance["Tags"]:
+                    if tag.get("Key") == "Name":
+                        instance_name = tag.get("Value")
+                        break
+
             instances.append({
                 "instance_id": instance["InstanceId"],
-                "instance_type": instance["InstanceType"]
+                "instance_type": instance["InstanceType"],
+                "instance_name": instance_name
             })
 
     return instances

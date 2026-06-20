@@ -1,5 +1,17 @@
-.env
-.ENV
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+
+# Python
 venv/
 __pycache__/
 *.pyc
+
+# Secrets
+.env
+.ENV
+
+# Runtime Data
+storage/*.json

@@ -9,26 +9,61 @@ WEBHOOK_URL = os.getenv(
 )
 
 def send_alert(
+    instance_name,
     instance_id,
+    owner,
     cpu_usage,
     monthly_cost
 ):
 
     payload = {
-        "text": f"""
-⚠️ SentinelFinOps Alert
+    "blocks": [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"""⚠️ *SentinelFinOps Alert*
 
-Instance ID: {instance_id}
+*Instance Name:* {instance_name}
+*Instance ID:* {instance_id}
 
-CPU Usage: {cpu_usage:.2f}%
+*Owner:* {owner}
 
-Estimated Monthly Cost: ${monthly_cost:.2f}
+*CPU Usage:* {cpu_usage:.2f}%
 
-Potential Savings: ${monthly_cost:.2f}/month
+*Estimated Monthly Cost:* ${monthly_cost:.2f}
 
-Recommendation: Review or Terminate
+*Potential Savings:* ${monthly_cost:.2f}/month
+
+*Recommendation:* Review or Terminate
 """
-    }
+            }
+        },
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {
+                        "type": "plain_text",
+                        "text": "✅ Acknowledge"
+                    },
+                    "action_id": "acknowledge",
+                    "value": instance_id
+                },
+                {
+                    "type": "button",
+                    "text": {
+                        "type": "plain_text",
+                        "text": "⏰ Snooze"
+                    },
+                    "action_id": "snooze",
+                    "value": instance_id
+                }
+            ]
+        }
+    ]
+}
 
     response = requests.post(
         WEBHOOK_URL,
