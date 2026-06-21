@@ -37,11 +37,11 @@ Illustrates the hourly scanner execution flow across the AWS Organization struct
 
 ```mermaid
 graph TD
-    EventBridge["EventBridge Scheduler"] -->|Trigger (1hr)| Lambda["Lambda FinOps Engine"]
+    EventBridge["EventBridge Scheduler"] -->|Trigger 1hr| Lambda["Lambda FinOps Engine"]
     Lambda -->|1. List Accounts| Org["AWS Organizations"]
     Org -->|2. Return Accounts| Lambda
     Lambda -->|3. Assume SentinelFinOpsExecutionRole| Member["Member Accounts (1..N)"]
-    Member -->|4. Scan Regions (Allow/Deny)| Scan["Scan Resources"]
+    Member -->|4. Scan Regions - Allow or Deny| Scan["Scan Resources"]
     Scan -->|Fetch Metrics| CW["CloudWatch Metrics"]
     Scan -->|Identify Creator| CT["CloudTrail Lookup"]
     Scan -->|Publish Stats| CW_Metrics["CloudWatch Custom Metrics"]
