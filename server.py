@@ -55,9 +55,25 @@ def actions():
             "text": f"Instance {instance_id} acknowledged"
         }), 200
 
+    elif action == "autofix":
+        from storage.remediation_manager import stop_instance_with_backup
+        from storage.alert_state_manager import set_alert_state
+
+        ami_id = stop_instance_with_backup(instance_id)
+        if ami_id:
+            set_alert_state(instance_id, "REMEDIATED")
+            return jsonify({
+                "text": f"Resource optimized\nInstance: {instance_id}\nBackup AMI: {ami_id}\nAction: STOP_INSTANCE"
+            }), 200
+        else:
+            return jsonify({
+                "text": f"Failed to optimize resource {instance_id}"
+            }), 500
+
     return {
         "text": f"Action '{action}' recorded for {instance_id}"
     }
+
 
 if __name__ == "__main__":
     app.run(port=5000)

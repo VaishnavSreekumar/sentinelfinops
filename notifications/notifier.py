@@ -59,7 +59,17 @@ def send_alert(
                     },
                     "action_id": "snooze",
                     "value": instance_id
+                },
+                {
+                    "type": "button",
+                    "text": {
+                        "type": "plain_text",
+                        "text": "Auto Fix"
+                    },
+                    "action_id": "autofix",
+                    "value": instance_id
                 }
+
             ]
         }
     ]

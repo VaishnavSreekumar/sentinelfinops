@@ -74,6 +74,11 @@ def run_scan():
                 print("State: ACKNOWLEDGED")
                 print("Alert acknowledged")
 
+            elif state == "REMEDIATED":
+                print("State: REMEDIATED")
+                print("Alert remediated")
+
+
         else:
 
             from storage.alert_state_manager import clear_alert_state

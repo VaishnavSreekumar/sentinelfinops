@@ -29,6 +29,9 @@ resource "aws_iam_user_policy" "dev_user_policy" {
         Effect = "Allow"
         Action = [
           "ec2:DescribeInstances",
+          "ec2:CreateImage",
+          "ec2:StopInstances",
+          "ec2:DescribeImages",
           "cloudwatch:GetMetricStatistics",
           "cloudtrail:LookupEvents"
         ]
@@ -45,6 +48,17 @@ resource "aws_iam_user_policy" "dev_user_policy" {
           aws_dynamodb_table.snoozes.arn,
           aws_dynamodb_table.audit.arn,
           aws_dynamodb_table.alert_state.arn
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:Query"
+        ]
+        Resource = [
+          aws_dynamodb_table.remediation_history.arn
         ]
       }
     ]
@@ -94,6 +108,9 @@ resource "aws_iam_role_policy" "lambda_custom_policy" {
         Effect = "Allow"
         Action = [
           "ec2:DescribeInstances",
+          "ec2:CreateImage",
+          "ec2:StopInstances",
+          "ec2:DescribeImages",
           "cloudwatch:GetMetricStatistics",
           "cloudtrail:LookupEvents"
         ]
@@ -110,6 +127,17 @@ resource "aws_iam_role_policy" "lambda_custom_policy" {
           aws_dynamodb_table.snoozes.arn,
           aws_dynamodb_table.audit.arn,
           aws_dynamodb_table.alert_state.arn
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:Query"
+        ]
+        Resource = [
+          aws_dynamodb_table.remediation_history.arn
         ]
       }
     ]
@@ -141,6 +169,8 @@ resource "aws_lambda_function" "sentinelfinops" {
       AWS_REGION        = var.aws_region
     }
   }
+
+
 }
 
 # 6. EventBridge Target
@@ -199,6 +229,23 @@ resource "aws_dynamodb_table" "alert_state" {
 
   attribute {
     name = "instance_id"
+    type = "S"
+  }
+}
+
+resource "aws_dynamodb_table" "remediation_history" {
+  name         = "sentinelfinops-remediation-history"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "resource_id"
+  range_key    = "timestamp"
+
+  attribute {
+    name = "resource_id"
+    type = "S"
+  }
+
+  attribute {
+    name = "timestamp"
     type = "S"
   }
 }
