@@ -235,10 +235,6 @@ Resources provisioned by this plan:
 
 ---
 
-## Resume Impact
 
-This project showcases engineering capabilities relevant to cloud platforms and infrastructure automation:
-* **Infrastructure as Code (IaC)**: Structuring clean, plan-validated Terraform variables, resources, and outputs using official HashiCorp AWS providers.
-* **AWS SDK Architecture**: Utilizing Boto3 client connections to retrieve cross-service information (EC2 configurations, CloudWatch averages, and CloudTrail event lists).
 * **Distributed State Management**: Designing lightweight state storage parsing timezone-aware date comparisons.
 * **ChatOps Engineering**: Designing interactive, bidirectional webhook callback APIs to integrate third-party communications (Slack Block Kit) with internal script execution state.
