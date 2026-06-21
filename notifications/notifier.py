@@ -14,12 +14,18 @@ def send_alert(
     instance_id,
     owner,
     cpu_usage,
-    monthly_cost
+    monthly_cost,
+    account_id="Unknown",
+    account_name="Unknown",
+    region="Unknown"
 ):
 
     button_value = json.dumps({
         "resource_type": "EC2",
-        "resource_id": instance_id
+        "resource_id": instance_id,
+        "account_id": account_id,
+        "account_name": account_name,
+        "region": region
     })
 
     payload = {
@@ -29,6 +35,10 @@ def send_alert(
             "text": {
                 "type": "mrkdwn",
                 "text": f"""⚠️ *SentinelFinOps Alert*
+
+*Account Name:* {account_name}
+*Account ID:* {account_id}
+*Region:* {region}
 
 *Instance Name:* {instance_name}
 *Instance ID:* {instance_id}
@@ -91,10 +101,13 @@ def send_alert(
         response.status_code
     )
 
-def send_ebs_alert(volume_id, size, monthly_savings):
+def send_ebs_alert(volume_id, size, monthly_savings, account_id="Unknown", account_name="Unknown", region="Unknown"):
     button_value = json.dumps({
         "resource_type": "EBS",
-        "resource_id": volume_id
+        "resource_id": volume_id,
+        "account_id": account_id,
+        "account_name": account_name,
+        "region": region
     })
 
     payload = {
@@ -104,6 +117,10 @@ def send_ebs_alert(volume_id, size, monthly_savings):
                 "text": {
                     "type": "mrkdwn",
                     "text": f"""⚠️ *Unused EBS Volume Detected*
+
+*Account Name:* {account_name}
+*Account ID:* {account_id}
+*Region:* {region}
 
 *Volume:*
 {volume_id}

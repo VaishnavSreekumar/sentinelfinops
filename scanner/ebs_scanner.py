@@ -1,8 +1,13 @@
 import boto3
 from scanner.config import AWS_REGION
 
-def get_unattached_volumes():
-    ec2 = boto3.client("ec2", region_name=AWS_REGION)
+def get_unattached_volumes(session=None, region=None):
+    target_region = region if region else AWS_REGION
+    if session:
+        ec2 = session.client("ec2", region_name=target_region)
+    else:
+        ec2 = boto3.client("ec2", region_name=target_region)
+        
     response = ec2.describe_volumes(
         Filters=[
             {

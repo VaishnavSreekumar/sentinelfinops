@@ -15,10 +15,16 @@ def actions():
     action = payload["actions"][0]["action_id"]
     raw_value = payload["actions"][0]["value"]
     
+    account_id = "Unknown"
+    account_name = "Unknown"
+    region = "Unknown"
     try:
         value_data = json.loads(raw_value)
         resource_type = value_data.get("resource_type", "EC2")
         resource_id = value_data.get("resource_id", raw_value)
+        account_id = value_data.get("account_id", "Unknown")
+        account_name = value_data.get("account_name", "Unknown")
+        region = value_data.get("region", "Unknown")
     except Exception:
         if raw_value.startswith("vol-"):
             resource_type = "EBS"
@@ -30,6 +36,8 @@ def actions():
     print("Action:", action)
     print("Resource Type:", resource_type)
     print("Resource ID:", resource_id)
+    print("Account:", account_name, f"({account_id})")
+    print("Region:", region)
 
     if action == "snooze":
         import boto3
@@ -59,7 +67,7 @@ def actions():
 
     elif action == "acknowledge":
         from storage.audit_logger import log_action
-        log_action(resource_id, "acknowledged")
+        log_action(resource_id, "acknowledged", account_id, account_name, region)
 
         from storage.alert_state_manager import set_alert_state
         set_alert_state(resource_id, "ACKNOWLEDGED")
@@ -74,7 +82,7 @@ def actions():
 
         if resource_type == "EBS":
             from storage.ebs_remediation_manager import delete_volume_with_snapshot
-            snapshot_id = delete_volume_with_snapshot(resource_id)
+            snapshot_id = delete_volume_with_snapshot(resource_id, account_id, account_name, region)
             if snapshot_id:
                 set_alert_state(resource_id, "REMEDIATED")
                 return jsonify({
@@ -86,7 +94,7 @@ def actions():
                 }), 500
         else:
             from storage.remediation_manager import stop_instance_with_backup
-            ami_id = stop_instance_with_backup(resource_id)
+            ami_id = stop_instance_with_backup(resource_id, account_id, account_name, region)
             if ami_id:
                 set_alert_state(resource_id, "REMEDIATED")
                 return jsonify({

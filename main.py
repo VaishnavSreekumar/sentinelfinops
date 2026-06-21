@@ -1,6 +1,9 @@
 import sys
 from scanner.run_scan import run_scan
-from reporting.savings_report import generate_savings_report, generate_trend_report, generate_monthly_report
+from reporting.savings_report import (
+    generate_savings_report, generate_trend_report,
+    generate_monthly_report, generate_account_report
+)
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
@@ -11,6 +14,8 @@ if __name__ == "__main__":
             generate_trend_report()
         elif arg == "monthly":
             generate_monthly_report()
+        elif arg == "accounts":
+            generate_account_report()
         else:
             run_scan()
     else:

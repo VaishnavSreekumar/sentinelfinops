@@ -36,10 +36,14 @@ resource "aws_iam_user_policy" "dev_user_policy" {
           "ec2:CreateSnapshot",
           "ec2:DeleteVolume",
           "ec2:DescribeSnapshots",
+          "ec2:DescribeRegions",
           "cloudwatch:GetMetricStatistics",
           "cloudtrail:LookupEvents",
           "ce:GetCostAndUsage",
-          "pricing:GetProducts"
+          "pricing:GetProducts",
+          "organizations:ListAccounts",
+          "organizations:DescribeOrganization",
+          "sts:AssumeRole"
         ]
         Resource = "*"
       },
@@ -58,7 +62,9 @@ resource "aws_iam_user_policy" "dev_user_policy" {
           aws_dynamodb_table.alert_state.arn,
           aws_dynamodb_table.remediation_history.arn,
           aws_dynamodb_table.savings_history.arn,
-          aws_dynamodb_table.pricing_cache.arn
+          aws_dynamodb_table.pricing_cache.arn,
+          aws_dynamodb_table.account_registry.arn,
+          aws_dynamodb_table.remediation_locks.arn
         ]
       }
     ]
@@ -115,10 +121,14 @@ resource "aws_iam_role_policy" "lambda_custom_policy" {
           "ec2:CreateSnapshot",
           "ec2:DeleteVolume",
           "ec2:DescribeSnapshots",
+          "ec2:DescribeRegions",
           "cloudwatch:GetMetricStatistics",
           "cloudtrail:LookupEvents",
           "ce:GetCostAndUsage",
-          "pricing:GetProducts"
+          "pricing:GetProducts",
+          "organizations:ListAccounts",
+          "organizations:DescribeOrganization",
+          "sts:AssumeRole"
         ]
         Resource = "*"
       },
@@ -137,7 +147,9 @@ resource "aws_iam_role_policy" "lambda_custom_policy" {
           aws_dynamodb_table.alert_state.arn,
           aws_dynamodb_table.remediation_history.arn,
           aws_dynamodb_table.savings_history.arn,
-          aws_dynamodb_table.pricing_cache.arn
+          aws_dynamodb_table.pricing_cache.arn,
+          aws_dynamodb_table.account_registry.arn,
+          aws_dynamodb_table.remediation_locks.arn
         ]
       }
     ]
@@ -276,6 +288,28 @@ resource "aws_dynamodb_table" "pricing_cache" {
 
   attribute {
     name = "cache_key"
+    type = "S"
+  }
+}
+
+resource "aws_dynamodb_table" "account_registry" {
+  name         = "sentinelfinops-account-registry"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "account_id"
+
+  attribute {
+    name = "account_id"
+    type = "S"
+  }
+}
+
+resource "aws_dynamodb_table" "remediation_locks" {
+  name         = "sentinelfinops-remediation-locks"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "resource_id"
+
+  attribute {
+    name = "resource_id"
     type = "S"
   }
 }

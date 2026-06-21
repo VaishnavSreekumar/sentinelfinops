@@ -2,17 +2,17 @@ import boto3
 from datetime import datetime, timedelta, timezone
 from scanner.config import AWS_REGION
 
-cloudwatch = boto3.client(
-    "cloudwatch",
-    region_name=AWS_REGION
-)
-
-def get_average_cpu(instance_id):
+def get_average_cpu(instance_id, session=None, region=None):
+    target_region = region if region else AWS_REGION
+    if session:
+        cw = session.client("cloudwatch", region_name=target_region)
+    else:
+        cw = boto3.client("cloudwatch", region_name=target_region)
 
     end_time = datetime.now(timezone.utc)
     start_time = end_time - timedelta(hours=1)
 
-    metrics = cloudwatch.get_metric_statistics(
+    metrics = cw.get_metric_statistics(
         Namespace="AWS/EC2",
         MetricName="CPUUtilization",
         Dimensions=[
