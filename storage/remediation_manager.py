@@ -26,7 +26,9 @@ def create_ami_backup(instance_id):
 def record_remediation(resource_id, action, backup_id, status, timestamp=None, 
                        resource_name="Unknown", instance_type=None, subnet_id=None,
                        security_groups=None, iam_profile=None, key_name=None,
-                       estimated_monthly_savings=0.0):
+                       estimated_monthly_savings=0.0, resource_type="EC2", backup_type="AMI",
+                       remediation_category=None, volume_type=None, availability_zone=None,
+                       size_gb=None, tags=None):
     if not timestamp:
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
         
@@ -37,7 +39,7 @@ def record_remediation(resource_id, action, backup_id, status, timestamp=None,
         item = {
             "resource_id": resource_id,
             "timestamp": timestamp,
-            "resource_type": "EC2",
+            "resource_type": resource_type,
             "action": action,
             "status": status,
             "resource_name": resource_name
@@ -45,7 +47,7 @@ def record_remediation(resource_id, action, backup_id, status, timestamp=None,
         
         if backup_id:
             item["backup_id"] = backup_id
-            item["backup_type"] = "AMI"
+            item["backup_type"] = backup_type
             
         if instance_type:
             item["instance_type"] = instance_type
@@ -64,6 +66,21 @@ def record_remediation(resource_id, action, backup_id, status, timestamp=None,
             
         if estimated_monthly_savings is not None:
             item["estimated_monthly_savings"] = Decimal(str(estimated_monthly_savings))
+            
+        if remediation_category:
+            item["remediation_category"] = remediation_category
+            
+        if volume_type:
+            item["volume_type"] = volume_type
+            
+        if availability_zone:
+            item["availability_zone"] = availability_zone
+            
+        if size_gb is not None:
+            item["size_gb"] = Decimal(str(size_gb))
+            
+        if tags:
+            item["tags"] = tags
             
         table.put_item(Item=item)
         return timestamp
@@ -133,7 +150,8 @@ def stop_instance_with_backup(instance_id):
             security_groups=security_groups,
             iam_profile=iam_profile,
             key_name=key_name,
-            estimated_monthly_savings=savings
+            estimated_monthly_savings=savings,
+            remediation_category="COMPUTE"
         )
         
         # 3. Stop instance
@@ -155,9 +173,11 @@ def stop_instance_with_backup(instance_id):
             security_groups=security_groups,
             iam_profile=iam_profile,
             key_name=key_name,
-            estimated_monthly_savings=savings
+            estimated_monthly_savings=savings,
+            remediation_category="COMPUTE"
         )
         print("Remediation recorded")
+
         
         # Audit logging integration
         log_action(instance_id, "remediated")

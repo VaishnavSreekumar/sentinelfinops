@@ -13,11 +13,23 @@ def actions():
     )
 
     action = payload["actions"][0]["action_id"]
-    instance_id = payload["actions"][0]["value"]
+    raw_value = payload["actions"][0]["value"]
+    
+    try:
+        value_data = json.loads(raw_value)
+        resource_type = value_data.get("resource_type", "EC2")
+        resource_id = value_data.get("resource_id", raw_value)
+    except Exception:
+        if raw_value.startswith("vol-"):
+            resource_type = "EBS"
+        else:
+            resource_type = "EC2"
+        resource_id = raw_value
 
     print("\n=== BUTTON CLICK ===")
     print("Action:", action)
-    print("Instance:", instance_id)
+    print("Resource Type:", resource_type)
+    print("Resource ID:", resource_id)
 
     if action == "snooze":
         import boto3
@@ -32,7 +44,7 @@ def actions():
             table = dynamodb.Table(SNOOZE_TABLE)
             table.put_item(
                 Item={
-                    "instance_id": instance_id,
+                    "instance_id": resource_id,
                     "expiry_timestamp": expiration,
                     "ttl": ttl
                 }
@@ -40,38 +52,54 @@ def actions():
         except Exception as e:
             print(f"Error saving snooze to DynamoDB: {e}")
 
+        msg_type = "Volume" if resource_type == "EBS" else "Instance"
         return jsonify({
-            "text": f"Instance {instance_id} snoozed for 24h"
+            "text": f"{msg_type} {resource_id} snoozed for 24h"
         }), 200
 
     elif action == "acknowledge":
         from storage.audit_logger import log_action
-        log_action(instance_id, "acknowledged")
+        log_action(resource_id, "acknowledged")
 
         from storage.alert_state_manager import set_alert_state
-        set_alert_state(instance_id, "ACKNOWLEDGED")
+        set_alert_state(resource_id, "ACKNOWLEDGED")
 
+        msg_type = "Volume" if resource_type == "EBS" else "Instance"
         return jsonify({
-            "text": f"Instance {instance_id} acknowledged"
+            "text": f"{msg_type} {resource_id} acknowledged"
         }), 200
 
     elif action == "autofix":
-        from storage.remediation_manager import stop_instance_with_backup
         from storage.alert_state_manager import set_alert_state
 
-        ami_id = stop_instance_with_backup(instance_id)
-        if ami_id:
-            set_alert_state(instance_id, "REMEDIATED")
-            return jsonify({
-                "text": f"Resource optimized\nInstance: {instance_id}\nBackup AMI: {ami_id}\nAction: STOP_INSTANCE"
-            }), 200
+        if resource_type == "EBS":
+            from storage.ebs_remediation_manager import delete_volume_with_snapshot
+            snapshot_id = delete_volume_with_snapshot(resource_id)
+            if snapshot_id:
+                set_alert_state(resource_id, "REMEDIATED")
+                return jsonify({
+                    "text": f"Resource optimized\nVolume: {resource_id}\nBackup Snapshot: {snapshot_id}\nAction: DELETE_VOLUME"
+                }), 200
+            else:
+                return jsonify({
+                    "text": f"Failed to optimize volume {resource_id} (or already remediated)"
+                }), 500
         else:
-            return jsonify({
-                "text": f"Failed to optimize resource {instance_id}"
-            }), 500
+            from storage.remediation_manager import stop_instance_with_backup
+            ami_id = stop_instance_with_backup(resource_id)
+            if ami_id:
+                set_alert_state(resource_id, "REMEDIATED")
+                return jsonify({
+                    "text": f"Resource optimized\nInstance: {resource_id}\nBackup AMI: {ami_id}\nAction: STOP_INSTANCE"
+                }), 200
+            else:
+                return jsonify({
+                    "text": f"Failed to optimize resource {resource_id}"
+                }), 500
 
+    msg_type = "Volume" if resource_type == "EBS" else "Instance"
     return {
-        "text": f"Action '{action}' recorded for {instance_id}"
+        "text": f"Action '{action}' recorded for {msg_type} {resource_id}"
     }
 
 
