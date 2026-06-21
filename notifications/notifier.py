@@ -1,13 +1,6 @@
-import os
 import requests
 import json
-from dotenv import load_dotenv
-
-load_dotenv()
-
-WEBHOOK_URL = os.getenv(
-    "SLACK_WEBHOOK_URL"
-)
+from scanner.config import SLACK_WEBHOOK_URL as WEBHOOK_URL
 
 def send_alert(
     instance_name,
@@ -176,4 +169,4 @@ ${monthly_savings:.2f}/month
     print(
         "Slack Status (EBS):",
         response.status_code
-    )
+    )

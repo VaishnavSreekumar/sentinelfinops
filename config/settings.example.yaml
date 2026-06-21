@@ -1,0 +1,29 @@
+# SentinelFinOps Configuration Settings Template
+config_version: 1
+
+aws:
+  default_region: "ap-south-1"
+  organizations_enabled: true
+  management_account_id: "123456789012"
+  role_name: "SentinelFinOpsExecutionRole"
+  allowed_regions: []
+  denied_regions: []
+
+slack:
+  webhook_url: ""
+  notification_channel: "#general"
+
+remediation:
+  dry_run: true
+  backup_enabled: true
+  remediation_lock_timeout_minutes: 15
+
+finops:
+  cpu_threshold: 5.0
+  idle_days_threshold: 7
+  cost_explorer_enabled: true
+  pricing_api_enabled: true
+
+reporting:
+  report_retention_days: 90
+  trend_history_days: 30

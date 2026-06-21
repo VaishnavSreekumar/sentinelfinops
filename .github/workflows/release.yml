@@ -1,0 +1,67 @@
+name: Build & Release Package
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install PyYAML to Lambda package
+      run: |
+        pip install PyYAML==6.0.1 -t lambda_package
+
+    - name: Copy latest Python modules to Lambda package
+      run: |
+        # Manually staging latest code into lambda_package
+        cp config_loader.py lambda_package/
+        cp version.py lambda_package/
+        mkdir -p lambda_package/config
+        cp config/settings.example.yaml lambda_package/config/settings.example.yaml
+        # If settings.yaml is found, copy it, else copy example as settings.yaml
+        if [ -f config/settings.yaml ]; then
+          cp config/settings.yaml lambda_package/config/settings.yaml
+        else
+          cp config/settings.example.yaml lambda_package/config/settings.yaml
+        fi
+        cp -r monitoring lambda_package/
+        cp -r validation lambda_package/
+        cp -r scanner lambda_package/
+        cp -r engine lambda_package/
+        cp -r notifications lambda_package/
+        cp -r reporting lambda_package/
+        cp -r storage lambda_package/
+
+    - name: Zip Lambda Package
+      run: |
+        cd lambda_package
+        zip -r ../sentinelfinops-${{ github.ref_name }}.zip .
+        cd ..
+
+    - name: Generate Checksums
+      run: |
+        sha256sum sentinelfinops-${{ github.ref_name }}.zip > SHA256SUMS.txt
+
+    - name: Create Release
+      id: create_release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          sentinelfinops-${{ github.ref_name }}.zip
+          SHA256SUMS.txt
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

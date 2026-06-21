@@ -1,5 +1,4 @@
-IDLE_THRESHOLD = 5.0
+from scanner.config import CPU_THRESHOLD
 
 def is_idle(cpu_usage):
-
-    return cpu_usage < IDLE_THRESHOLD
+    return cpu_usage < CPU_THRESHOLD
