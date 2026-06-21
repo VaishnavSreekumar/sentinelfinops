@@ -28,7 +28,8 @@ def record_remediation(resource_id, action, backup_id, status, timestamp=None,
                        security_groups=None, iam_profile=None, key_name=None,
                        estimated_monthly_savings=0.0, resource_type="EC2", backup_type="AMI",
                        remediation_category=None, volume_type=None, availability_zone=None,
-                       size_gb=None, tags=None):
+                       size_gb=None, tags=None, actual_monthly_cost_at_remediation=None, cost_source=None,
+                       savings_confidence=None):
     if not timestamp:
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
         
@@ -81,6 +82,15 @@ def record_remediation(resource_id, action, backup_id, status, timestamp=None,
             
         if tags:
             item["tags"] = tags
+            
+        if actual_monthly_cost_at_remediation is not None:
+            item["actual_monthly_cost_at_remediation"] = Decimal(str(actual_monthly_cost_at_remediation))
+            
+        if cost_source:
+            item["cost_source"] = cost_source
+            
+        if savings_confidence:
+            item["savings_confidence"] = savings_confidence
             
         table.put_item(Item=item)
         return timestamp
@@ -138,6 +148,24 @@ def stop_instance_with_backup(instance_id):
         if not ami_id:
             raise Exception("Failed to create AMI backup")
             
+        # Query Cost Explorer BEFORE stopping the instance
+        from storage.cost_explorer import get_monthly_cost_for_resource
+        actual_cost = get_monthly_cost_for_resource(instance_id)
+        if actual_cost > 0.0:
+            cost_source = "COST_EXPLORER"
+            savings_confidence = "HIGH"
+        else:
+            print("Falling back to Pricing API")
+            from storage.pricing_service import get_ec2_monthly_cost
+            actual_cost = get_ec2_monthly_cost(instance_type, AWS_REGION)
+            if actual_cost > 0.0:
+                cost_source = "PRICING_API"
+                savings_confidence = "MEDIUM"
+            else:
+                cost_source = "ESTIMATED"
+                savings_confidence = "LOW"
+                actual_cost = savings
+            
         # 2. Record backup in DynamoDB as PENDING (silent)
         timestamp = record_remediation(
             resource_id=instance_id,
@@ -151,7 +179,10 @@ def stop_instance_with_backup(instance_id):
             iam_profile=iam_profile,
             key_name=key_name,
             estimated_monthly_savings=savings,
-            remediation_category="COMPUTE"
+            remediation_category="COMPUTE",
+            actual_monthly_cost_at_remediation=actual_cost,
+            cost_source=cost_source,
+            savings_confidence=savings_confidence
         )
         
         # 3. Stop instance
@@ -174,9 +205,13 @@ def stop_instance_with_backup(instance_id):
             iam_profile=iam_profile,
             key_name=key_name,
             estimated_monthly_savings=savings,
-            remediation_category="COMPUTE"
+            remediation_category="COMPUTE",
+            actual_monthly_cost_at_remediation=actual_cost,
+            cost_source=cost_source,
+            savings_confidence=savings_confidence
         )
         print("Remediation recorded")
+
 
         
         # Audit logging integration

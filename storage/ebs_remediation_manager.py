@@ -59,6 +59,24 @@ def delete_volume_with_snapshot(volume_id):
         if not snapshot_id:
             raise Exception("Failed to create snapshot backup")
 
+        # Query Cost Explorer BEFORE deleting the volume
+        from storage.cost_explorer import get_monthly_cost_for_resource
+        actual_cost = get_monthly_cost_for_resource(volume_id)
+        if actual_cost > 0.0:
+            cost_source = "COST_EXPLORER"
+            savings_confidence = "HIGH"
+        else:
+            print("Falling back to Pricing API")
+            from storage.pricing_service import get_ebs_monthly_cost
+            actual_cost = get_ebs_monthly_cost(vol_type, size, AWS_REGION)
+            if actual_cost > 0.0:
+                cost_source = "PRICING_API"
+                savings_confidence = "MEDIUM"
+            else:
+                cost_source = "ESTIMATED"
+                savings_confidence = "LOW"
+                actual_cost = savings
+
         # 2. Record PENDING record (silent)
         timestamp = record_remediation(
             resource_id=volume_id,
@@ -73,7 +91,10 @@ def delete_volume_with_snapshot(volume_id):
             volume_type=vol_type,
             availability_zone=az,
             size_gb=size,
-            tags=tags
+            tags=tags,
+            actual_monthly_cost_at_remediation=actual_cost,
+            cost_source=cost_source,
+            savings_confidence=savings_confidence
         )
 
         # 3. Delete volume
@@ -97,7 +118,10 @@ def delete_volume_with_snapshot(volume_id):
             volume_type=vol_type,
             availability_zone=az,
             size_gb=size,
-            tags=tags
+            tags=tags,
+            actual_monthly_cost_at_remediation=actual_cost,
+            cost_source=cost_source,
+            savings_confidence=savings_confidence
         )
         print("Remediation recorded")
 
@@ -125,8 +149,12 @@ def delete_volume_with_snapshot(volume_id):
                     volume_type=vol_type,
                     availability_zone=az,
                     size_gb=size,
-                    tags=tags
+                    tags=tags,
+                    actual_monthly_cost_at_remediation=actual_cost if 'actual_cost' in locals() else None,
+                    cost_source=cost_source if 'cost_source' in locals() else None,
+                    savings_confidence=savings_confidence if 'savings_confidence' in locals() else None
                 )
             except Exception as inner_e:
                 print(f"Error recording failure: {inner_e}")
         return None
+

@@ -37,7 +37,9 @@ resource "aws_iam_user_policy" "dev_user_policy" {
           "ec2:DeleteVolume",
           "ec2:DescribeSnapshots",
           "cloudwatch:GetMetricStatistics",
-          "cloudtrail:LookupEvents"
+          "cloudtrail:LookupEvents",
+          "ce:GetCostAndUsage",
+          "pricing:GetProducts"
         ]
         Resource = "*"
       },
@@ -46,23 +48,17 @@ resource "aws_iam_user_policy" "dev_user_policy" {
         Action = [
           "dynamodb:GetItem",
           "dynamodb:PutItem",
-          "dynamodb:DeleteItem"
+          "dynamodb:DeleteItem",
+          "dynamodb:Query",
+          "dynamodb:Scan"
         ]
         Resource = [
           aws_dynamodb_table.snoozes.arn,
           aws_dynamodb_table.audit.arn,
-          aws_dynamodb_table.alert_state.arn
-        ]
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "dynamodb:GetItem",
-          "dynamodb:PutItem",
-          "dynamodb:Query"
-        ]
-        Resource = [
-          aws_dynamodb_table.remediation_history.arn
+          aws_dynamodb_table.alert_state.arn,
+          aws_dynamodb_table.remediation_history.arn,
+          aws_dynamodb_table.savings_history.arn,
+          aws_dynamodb_table.pricing_cache.arn
         ]
       }
     ]
@@ -120,7 +116,9 @@ resource "aws_iam_role_policy" "lambda_custom_policy" {
           "ec2:DeleteVolume",
           "ec2:DescribeSnapshots",
           "cloudwatch:GetMetricStatistics",
-          "cloudtrail:LookupEvents"
+          "cloudtrail:LookupEvents",
+          "ce:GetCostAndUsage",
+          "pricing:GetProducts"
         ]
         Resource = "*"
       },
@@ -129,23 +127,17 @@ resource "aws_iam_role_policy" "lambda_custom_policy" {
         Action = [
           "dynamodb:GetItem",
           "dynamodb:PutItem",
-          "dynamodb:DeleteItem"
+          "dynamodb:DeleteItem",
+          "dynamodb:Query",
+          "dynamodb:Scan"
         ]
         Resource = [
           aws_dynamodb_table.snoozes.arn,
           aws_dynamodb_table.audit.arn,
-          aws_dynamodb_table.alert_state.arn
-        ]
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "dynamodb:GetItem",
-          "dynamodb:PutItem",
-          "dynamodb:Query"
-        ]
-        Resource = [
-          aws_dynamodb_table.remediation_history.arn
+          aws_dynamodb_table.alert_state.arn,
+          aws_dynamodb_table.remediation_history.arn,
+          aws_dynamodb_table.savings_history.arn,
+          aws_dynamodb_table.pricing_cache.arn
         ]
       }
     ]
@@ -256,6 +248,34 @@ resource "aws_dynamodb_table" "remediation_history" {
 
   attribute {
     name = "timestamp"
+    type = "S"
+  }
+}
+
+resource "aws_dynamodb_table" "savings_history" {
+  name         = "sentinelfinops-savings-history"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "report_date"
+  range_key    = "timestamp"
+
+  attribute {
+    name = "report_date"
+    type = "S"
+  }
+
+  attribute {
+    name = "timestamp"
+    type = "S"
+  }
+}
+
+resource "aws_dynamodb_table" "pricing_cache" {
+  name         = "sentinelfinops-pricing-cache"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "cache_key"
+
+  attribute {
+    name = "cache_key"
     type = "S"
   }
 }
