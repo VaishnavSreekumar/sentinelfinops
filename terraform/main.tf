@@ -178,13 +178,8 @@ resource "aws_lambda_function" "sentinelfinops" {
   environment {
     variables = {
       SLACK_WEBHOOK_URL = var.slack_webhook_url
-      AWS_REGION        = var.aws_region
     }
   }
-
-
-
-
 }
 
 # 6. EventBridge Target
