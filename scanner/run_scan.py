@@ -87,3 +87,41 @@ def run_scan():
             print("Alert state cleared")
 
         print("-" * 50)
+
+    from scanner.ebs_scanner import get_unattached_volumes, estimate_ebs_monthly_cost
+    ebs_volumes = get_unattached_volumes()
+    for vol in ebs_volumes:
+        vol_id = vol["volume_id"]
+        size = vol["size_gb"]
+        vol_type = vol["volume_type"]
+        savings = estimate_ebs_monthly_cost(vol)
+        
+        print("EBS Volume Found")
+        print(f"Volume ID: {vol_id}")
+        print(f"Size: {size} GB")
+        print(f"Type: {vol_type}")
+        print(f"Estimated Savings: ${savings:.2f}")
+        print()
+        
+        from storage.alert_state_manager import get_alert_state, set_alert_state
+        state = get_alert_state(vol_id)
+        
+        if state == "NEW":
+            print("State: NEW")
+            print("Sending alert")
+            from notifications.notifier import send_ebs_alert
+            send_ebs_alert(vol_id, size, savings)
+            set_alert_state(vol_id, "ALERTED")
+            print("State changed: ALERTED")
+        elif state == "ALERTED":
+            print("State: ALERTED")
+            print("Alert already active")
+        elif state == "ACKNOWLEDGED":
+            print("State: ACKNOWLEDGED")
+            print("Alert acknowledged")
+        elif state == "REMEDIATED":
+            print("State: REMEDIATED")
+            print("Volume remediated")
+            
+        print("-" * 50)
+

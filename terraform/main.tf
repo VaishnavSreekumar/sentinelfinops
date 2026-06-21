@@ -32,6 +32,10 @@ resource "aws_iam_user_policy" "dev_user_policy" {
           "ec2:CreateImage",
           "ec2:StopInstances",
           "ec2:DescribeImages",
+          "ec2:DescribeVolumes",
+          "ec2:CreateSnapshot",
+          "ec2:DeleteVolume",
+          "ec2:DescribeSnapshots",
           "cloudwatch:GetMetricStatistics",
           "cloudtrail:LookupEvents"
         ]
@@ -111,6 +115,10 @@ resource "aws_iam_role_policy" "lambda_custom_policy" {
           "ec2:CreateImage",
           "ec2:StopInstances",
           "ec2:DescribeImages",
+          "ec2:DescribeVolumes",
+          "ec2:CreateSnapshot",
+          "ec2:DeleteVolume",
+          "ec2:DescribeSnapshots",
           "cloudwatch:GetMetricStatistics",
           "cloudtrail:LookupEvents"
         ]
@@ -169,6 +177,8 @@ resource "aws_lambda_function" "sentinelfinops" {
       AWS_REGION        = var.aws_region
     }
   }
+
+
 
 
 }
