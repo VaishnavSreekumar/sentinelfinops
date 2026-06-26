@@ -105,3 +105,85 @@ graph TD
 1. **Least Privilege Execution Roles**: The `SentinelFinOpsExecutionRole` is granted read-only metadata permissions for scanning, and tight, resource-specific write permissions (`ec2:StopInstances`, `ec2:DeleteVolume`, `ec2:CreateSnapshot`, `ec2:CreateImage`) for remediation.
 2. **Management Account Safety**: Remediation is automatically skipped if the target resource resides in the AWS Organization Management Account.
 3. **Environment Security**: Sensitive keys and credentials are bound to environment variables or injected securely via Terraform configurations and the gitignored `config/settings.yaml`.
+
+---
+
+## Distributed Coordination (v4.6)
+
+### Remediation Concurrency & Idempotency Sequence
+
+The diagram below details how SentinelFinOps ensures that concurrent webhook calls (e.g. from multiple Slack button clicks) or overlapping Lambda scans do not trigger duplicate resource remediations or duplicate backups.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as Slack User
+    participant Slack as Slack Channel
+    participant Flask as Flask Server (server.py)
+    participant Remediation as Remediation Engine (remediation_manager.py)
+    participant DDBLock as DynamoDB Locks (sentinelfinops-remediation-locks)
+    participant DDBHist as DynamoDB History (sentinelfinops-remediation-history)
+    participant Backup as AWS Backup (AMI/Snapshot)
+    participant Resource as AWS Target Resource (EC2/EBS)
+    participant Audit as DynamoDB Audit (sentinelfinops-audit)
+
+    User->>Slack: Click "Auto Fix"
+    Slack->>Flask: POST /slack/actions (execution_id)
+    Flask->>Remediation: stop_instance_with_backup(execution_id)
+    
+    Remediation->>DDBHist: Check Idempotency Key (resource_id + action + account_id)
+    Note over Remediation,DDBHist: If status == SUCCESS, skip execution immediately
+    
+    Remediation->>DDBLock: acquire_lock (PutItem Condition: attribute_not_exists)
+    
+    alt Lock Acquired
+        DDBLock-->>Remediation: ACQUIRED
+        Remediation->>Backup: create_ami_backup() / create_snapshot_backup()
+        Backup-->>Remediation: Backup ID (AMI / Snapshot)
+        Remediation->>DDBLock: renew_lock (Extend lease heartbeat)
+        Remediation->>Resource: Stop EC2 / Delete EBS
+        Remediation->>Audit: log_action("remediated")
+        Remediation->>DDBHist: record_remediation(SUCCESS)
+        Remediation->>DDBLock: release_lock (Condition: execution_id match)
+        Remediation-->>Flask: Success Response
+        Flask-->>Slack: HTTP 200 (Resource optimized)
+    else Lock Denied (Stale Lock Check)
+        DDBLock-->>Remediation: ConditionalCheckFailedException
+        Remediation->>DDBLock: get_item() (read expiry)
+        alt Lock is Active
+            Remediation-->>Flask: LockContentionError
+            Flask-->>Slack: HTTP 409 (Resource already undergoing remediation)
+        else Lock is Expired
+            Remediation->>DDBLock: acquire_lock (PutItem Condition: old_execution_id + old_expiry match)
+            alt Takeover Success
+                DDBLock-->>Remediation: RECOVERED
+                Note over Remediation: Run backup, remediation, and release...
+            else Takeover Collision
+                Note over Remediation: Retry loop up to 3 times, then return DENIED
+            end
+        end
+    end
+```
+
+### Core Coordination Architecture
+
+#### 1. Why DynamoDB Conditional Writes?
+AWS DynamoDB supports atomic operations using `ConditionExpression` attributes. When acquiring a lock, SentinelFinOps attempts a conditional put verifying that the key `resource_id` does not exist:
+`ConditionExpression="attribute_not_exists(resource_id)"`
+If the record exists, the API atomically rejects the write with a `ConditionalCheckFailedException`, ensuring that exactly one execution thread claims the resource lock.
+
+#### 2. Why not threading.Lock or in-memory locking?
+In-memory locks (e.g. `threading.Lock`) only protect concurrent threads executing inside a single OS process container. SentinelFinOps is deployed in serverless, ephemeral environments (AWS Lambda invocations or distributed Flask application workers). An external, distributed locking provider (DynamoDB) is required to coordinate transactions across distinct compute contexts.
+
+#### 3. Stale Lock Recovery
+If an execution host crashes, terminates due to a Lambda timeout, or loses network connectivity mid-remediation, the lock is left in the database.
+* To prevent permanent deadlocks, locks are written with an `expires_at` ISO timestamp.
+* Subsequent attempts that receive a check failure read the lock row. If `expires_at` is in the past, they attempt an optimistic conditional write matching:
+  `ConditionExpression="execution_id = :old_exec AND expires_at = :old_exp"`
+* On success, the stale lease is safely overtaken (status `"RECOVERED"`). On collision (e.g. another concurrent run won the takeover), the worker retries up to 3 times before giving up.
+
+#### 4. Decoupled Idempotency
+Locks guarantee concurrency control (preventing overlapping runs). Idempotency guarantees once-per-resource safety (preventing repeated execution after completion).
+* Remediations check the history index database using a composite key: `resource_id + action + account_id`.
+* Even if locks expire or are released, the presence of a `SUCCESS` record with a matching idempotency key forces the remediation pipeline to return immediately without duplicate backup or stop/delete API calls.
+

@@ -106,6 +106,89 @@ sentinelfinops/
  └── server.py               # Slack webhook callback server
 ```
 
+## Distributed Locking & Concurrency Control (v4.6)
+
+SentinelFinOps implements a distributed locking layer to coordinate auto-remediation actions safely across:
+* EPHEMERAL contexts (multiple AWS Lambda cron runs)
+* DISTRIBUTED processes (Flask callback workers in server.py)
+* Multiple users clicking "Auto Fix" concurrently in Slack.
+
+### Why Duplicate Remediation is Dangerous
+Without proper synchronization:
+1. **Redundant Backups**: Simultaneous clicks start multiple AMIs or snapshots of the same resource, inflating EBS costs.
+2. **API Exceptions**: A second thread attempts to stop/delete an already stopped/deleted resource, raising errors.
+3. **Ledger Pollution**: Audit logs and savings records get written to multiple times.
+
+### How SentinelFinOps Solves This
+1. **Atomic Conditional Writes**: Acquiring a lock attempts a DynamoDB PutItem requiring `attribute_not_exists(resource_id)`.
+2. **Optimistic Lease Takeover**: Expired locks are recovered by validating that the previous owner (`execution_id`) and expiration time match when overwritten.
+3. **Decoupled Idempotency**: Prior to checking locks, the pipeline checks the history. If a SUCCESS state is logged for that `resource_id + action + account_id`, it skips execution immediately.
+4. **heartbeat Lease Renewal**: The lease is extended atomically right after successful backup creation (protecting against long backup latency).
+
+### Locking & Remediation Sequence Flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as Slack User / EventBridge
+    participant S as server.py / Callback
+    participant M as remediation_manager
+    participant L as remediation_lock
+    participant AWS as AWS (EC2/EBS)
+    participant DDB as DynamoDB (locks/history)
+
+    User->>S: Trigger Remediation (Slack/Cron)
+    S->>M: stop_instance_with_backup(resource_id)
+    activate M
+    M->>DDB: Check History (Idempotency Guard)
+    DDB-->>M: SUCCESS exists? (Yes -> IDEMPOTENT_SKIP)
+    
+    rect rgb(30, 30, 40)
+        Note over M, L: Concurrency Lock Acquisition
+        M->>L: acquire_lock(resource_id)
+        L->>DDB: PutItem with attribute_not_exists (TTL set)
+        alt Lock Acquired (Success)
+            DDB-->>L: Success
+            L-->>M: LockResult(ACQUIRED)
+        else Lock Contention (Active)
+            DDB-->>L: ConditionalCheckFailedException
+            L->>DDB: GetItem (Check Expiry)
+            DDB-->>L: Lock Item (Not Expired)
+            L-->>M: raise LockContentionError (409 response)
+        else Stale Lock (Lease Expired)
+            DDB-->>L: ConditionalCheckFailedException
+            L->>DDB: GetItem (Check Expiry)
+            DDB-->>L: Lock Item (Expired)
+            L->>DDB: PutItem (Condition: old_execution_id & old_expires_at)
+            DDB-->>L: Success (Optimistic Lease Recovery)
+            L-->>M: LockResult(RECOVERED)
+        end
+    end
+
+    M->>AWS: Create AMI Backup
+    AWS-->>M: ImageId
+    
+    Note over M, L: Heartbeat Lease Renewal & TTL update
+    M->>L: renew_lock(resource_id, execution_id)
+    L->>DDB: UpdateItem (Condition: execution_id, Set new expiry/TTL)
+    DDB-->>L: Success
+    L-->>M: LockResult(RENEWED)
+
+    M->>AWS: Stop Instance
+    AWS-->>M: Success
+
+    M->>DDB: Record SUCCESS (Audit / History / Savings)
+    
+    M->>L: release_lock(resource_id, execution_id)
+    L->>DDB: DeleteItem (Condition: execution_id)
+    DDB-->>L: Success
+    L-->>M: LockResult(RELEASED)
+    
+    deactivate M
+    M-->>S: Return ImageId
+    S-->>User: Remediation Completed (Slack Block Update)
+```
+
 ---
 
 ## Open Source Compliance
