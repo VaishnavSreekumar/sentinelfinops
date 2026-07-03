@@ -11,7 +11,7 @@ SentinelFinOps is structured as a decoupled, multi-layered system separating AWS
 ```mermaid
 flowchart TD
     subgraph Scheduling["Scheduling & Invocation"]
-        Scheduler["AWS EventBridge Scheduler"] -->|Hourly Trigger| Lambda["Lambda Scanner (run_scan.py)"]
+        Scheduler["AWS EventBridge Scheduler"] -->|Hourly Trigger| Lambda["Lambda Scanner"]
     end
 
     subgraph Discovery["Discovery & Context Collection"]
@@ -21,7 +21,7 @@ flowchart TD
         Lambda -->|CloudTrail API| CT["Owner Tag Tracing"]
     end
 
-    subgraph Runtime["AIRuntime (Composition Root)"]
+    subgraph Runtime["AIRuntime Composition Root"]
         ScanCtx["ScanContext Schema"] -->|Context Mapping| ContextBuilder["ContextBuilder"]
         ContextBuilder -->|Mapped JSON| AIGateway["AI Gateway Interceptor"]
         AIGateway -->|LLM Prompt Query| Provider["Provider Abstraction"]
@@ -53,7 +53,7 @@ flowchart TD
     main["main.py CLI"] --> RunScan["scanner/run_scan.py"]
     main --> HealthCheck["monitoring/healthcheck.py"]
     main --> Validator["validation/install_validator.py"]
-    main --> Server["server.py (Slack Callback)"]
+    main --> Server["server.py Slack Callback"]
 
     RunScan --> AIRuntime["ai/runtime.py"]
     AIRuntime --> ContextBuilder["ai/context_builder.py"]
@@ -75,10 +75,10 @@ The AI reasoning layer operates as a strict validation pipeline. Raw system cont
 
 ```mermaid
 flowchart LR
-    ScanContext["ScanContext (Raw AWS Data)"] -->|1. ContextMapper| ResourceContext["ResourceContextV1 (Normalized Contract)"]
-    ResourceContext -->|2. Gateway execute| Gateway["AI Gateway (Prompting + LLM)"]
-    Gateway -->|3. SchemaValidator| Recommendation["RecommendationV1 (Pydantic Schema)"]
-    Recommendation -->|4. PolicyEngine evaluate| PolicyResult["PolicyValidationResult (Governance Firewall)"]
+    ScanContext["ScanContext Raw AWS Data"] -->|1. ContextMapper| ResourceContext["ResourceContextV1 Normalized Contract"]
+    ResourceContext -->|2. Gateway execute| Gateway["AI Gateway Prompting + LLM"]
+    Gateway -->|3. SchemaValidator| Recommendation["RecommendationV1 Pydantic Schema"]
+    Recommendation -->|4. PolicyEngine evaluate| PolicyResult["PolicyValidationResult Governance Firewall"]
 ```
 
 ---
@@ -91,7 +91,7 @@ SentinelFinOps is deployed entirely as serverless AWS infrastructure using Terra
 flowchart TD
     subgraph Management["AWS Management Account"]
         EventBridge["AWS EventBridge Cron Rule"] -->|Hourly Target| LambdaScan["Lambda: sentinelfinops-scanner"]
-        FlaskServer["Flask Server (server.py)"] -->|Receives Actions| LambdaScan
+        FlaskServer["Flask Server server.py"] -->|Receives Actions| LambdaScan
         LambdaScan -->|Read/Write State| DDB_Snooze[("sentinelfinops-snoozes")]
         LambdaScan -->|Read/Write Alerts| DDB_AlertState[("sentinelfinops-alert-state")]
         LambdaScan -->|Write Audit Logs| DDB_Audit[("sentinelfinops-audit")]
@@ -224,7 +224,7 @@ The Policy Engine acts as a static compliance firewall, evaluating recommendatio
 
 ```mermaid
 flowchart TD
-    Rec["RecommendationV1 Input"] --> Engine["PolicyEngine.evaluate()"]
+    Rec["RecommendationV1 Input"] --> Engine["PolicyEngine evaluate"]
     Engine --> Rule1["Rule 1: ProductionGuard"]
     Engine --> Rule2["Rule 2: ExemptionCheck"]
 
@@ -250,12 +250,12 @@ The Telemetry Tracker records request lifecycles passively. It performs defensiv
 
 ```mermaid
 flowchart TD
-    Caller["AIRuntime / Evaluator"] -->|1. record_request()| Tracker["TelemetryTracker"]
-    Caller -->|2. record_response() OR record_failure()| Tracker
+    Caller["AIRuntime / Evaluator"] -->|1. record_request| Tracker["TelemetryTracker"]
+    Caller -->|2. record_response or record_failure| Tracker
     
     Tracker --> InternalList["_records : list[TelemetryRecord]"]
     
-    UserQuery["get_records()"] --> Tracker
+    UserQuery["get_records"] --> Tracker
     Tracker -->|Deep Copy/Defensive Copy| CopiedList["list[TelemetryRecord] (Read-Only Copy)"]
     CopiedList --> UserQuery
 ```
@@ -274,12 +274,12 @@ flowchart LR
     end
 
     subgraph Engine["Evaluator Engine"]
-        Evaluator["Evaluator (evaluator.py)"]
-        AIRuntime["AIRuntime.process()"]
+        Evaluator["Evaluator evaluator.py"]
+        AIRuntime["AIRuntime process"]
     end
 
-    Case1 -->|evaluate_all()| Evaluator
-    Case2 -->|evaluate_all()| Evaluator
+    Case1 -->|evaluate_all| Evaluator
+    Case2 -->|evaluate_all| Evaluator
     Evaluator -->|Sequential Process| AIRuntime
     AIRuntime -->|Assert Policy & Actions| Evaluator
     Evaluator -->|Output Results| ResultList["list[EvaluationResult]"]
