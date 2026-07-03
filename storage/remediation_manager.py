@@ -1,13 +1,20 @@
 from datetime import datetime, timezone
 from decimal import Decimal
+import os
+import socket
+import uuid
 import boto3
 from scanner.config import AWS_REGION, REMEDIATION_TABLE
 from storage.audit_logger import log_action
+from storage.remediation_lock import acquire_lock, release_lock, renew_lock, LockContentionError
+from monitoring.metrics import track_idempotent_skip, publish_cloudwatch_metric
 
-def create_ami_backup(instance_id):
+
+def create_ami_backup(instance_id, region=None):
+    target_region = region if region and region != "Unknown" else AWS_REGION
     try:
         print("Creating AMI backup...")
-        ec2 = boto3.client("ec2", region_name=AWS_REGION)
+        ec2 = boto3.client("ec2", region_name=target_region)
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
         name = f"sentinelfinops-backup-{instance_id}-{timestamp}"
         
@@ -29,7 +36,7 @@ def record_remediation(resource_id, action, backup_id, status, timestamp=None,
                        estimated_monthly_savings=0.0, resource_type="EC2", backup_type="AMI",
                        remediation_category=None, volume_type=None, availability_zone=None,
                        size_gb=None, tags=None, actual_monthly_cost_at_remediation=None, cost_source=None,
-                       savings_confidence=None):
+                       savings_confidence=None, account_id="Unknown", account_name="Unknown"):
     if not timestamp:
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
         
@@ -45,6 +52,11 @@ def record_remediation(resource_id, action, backup_id, status, timestamp=None,
             "status": status,
             "resource_name": resource_name
         }
+        
+        if account_id:
+            item["account_id"] = account_id
+        if account_name:
+            item["account_name"] = account_name
         
         if backup_id:
             item["backup_id"] = backup_id
@@ -117,9 +129,44 @@ def get_latest_backup(instance_id):
         print(f"Error getting latest backup: {e}")
         return None
 
-def stop_instance_with_backup(instance_id):
+def stop_instance_with_backup(instance_id, account_id="Unknown", account_name="Unknown", region="Unknown", execution_id=None, request_id=None):
+    # Decoupled Idempotency Check (resource_id + action + account_id)
+    latest = get_latest_backup(instance_id)
+    if latest and latest.get("status") == "SUCCESS" and latest.get("action") == "STOP_INSTANCE" and latest.get("account_id", "Unknown") == account_id:
+        print(f"Idempotency Guard: Resource {instance_id} was already successfully stop-remediated in account {account_id}.")
+        track_idempotent_skip()
+        return latest.get("backup_id")
+
+    own_lock = False
+    if not execution_id:
+        execution_id = str(uuid.uuid4())
+        own_lock = True
+        
+    if not request_id:
+        request_id = os.environ.get("AWS_LAMBDA_REQUEST_ID") or f"cli-{uuid.uuid4()}"
+        
+    hostname = socket.gethostname()
+    target_region = region if region and region != "Unknown" else AWS_REGION
+    
+    # Concurrency Lock Acquisition
+    lock_res = acquire_lock(
+        resource_id=instance_id,
+        execution_id=execution_id,
+        resource_type="EC2",
+        account_id=account_id,
+        region=target_region,
+        lock_owner="Orchestrator-Remediation",
+        request_id=request_id,
+        hostname=hostname
+    )
+    
+    if lock_res.status not in ("ACQUIRED", "RECOVERED"):
+        print(f"LOCK_DENIED resource={instance_id} execution={execution_id} owner={lock_res.owner} expires={lock_res.expires_at}")
+        log_action(instance_id, "skip_remediation", account_id, account_name, region, skip_reason="Resource lock denied: already being remediated.")
+        raise LockContentionError(instance_id, lock_res.owner, lock_res.expires_at)
+        
     try:
-        ec2 = boto3.client("ec2", region_name=AWS_REGION)
+        ec2 = boto3.client("ec2", region_name=target_region)
         
         # Describe instance metadata
         response = ec2.describe_instances(InstanceIds=[instance_id])
@@ -144,9 +191,12 @@ def stop_instance_with_backup(instance_id):
         savings = monthly_cost(instance_type)
         
         # 1. Create AMI backup
-        ami_id = create_ami_backup(instance_id)
+        ami_id = create_ami_backup(instance_id, region=target_region)
         if not ami_id:
             raise Exception("Failed to create AMI backup")
+            
+        # Heartbeat: Optimistic lock lease renewal right after backup succeeds
+        renew_lock(instance_id, execution_id)
             
         # Query Cost Explorer BEFORE stopping the instance
         from storage.cost_explorer import get_monthly_cost_for_resource
@@ -157,7 +207,7 @@ def stop_instance_with_backup(instance_id):
         else:
             print("Falling back to Pricing API")
             from storage.pricing_service import get_ec2_monthly_cost
-            actual_cost = get_ec2_monthly_cost(instance_type, AWS_REGION)
+            actual_cost = get_ec2_monthly_cost(instance_type, target_region)
             if actual_cost > 0.0:
                 cost_source = "PRICING_API"
                 savings_confidence = "MEDIUM"
@@ -182,7 +232,9 @@ def stop_instance_with_backup(instance_id):
             remediation_category="COMPUTE",
             actual_monthly_cost_at_remediation=actual_cost,
             cost_source=cost_source,
-            savings_confidence=savings_confidence
+            savings_confidence=savings_confidence,
+            account_id=account_id,
+            account_name=account_name
         )
         
         # 3. Stop instance
@@ -208,19 +260,22 @@ def stop_instance_with_backup(instance_id):
             remediation_category="COMPUTE",
             actual_monthly_cost_at_remediation=actual_cost,
             cost_source=cost_source,
-            savings_confidence=savings_confidence
+            savings_confidence=savings_confidence,
+            account_id=account_id,
+            account_name=account_name
         )
         print("Remediation recorded")
-
-
         
         # Audit logging integration
-        log_action(instance_id, "remediated")
+        log_action(instance_id, "remediated", account_id, account_name, target_region)
         
         return ami_id
     except Exception as e:
         print(f"Error during auto-remediation: {e}")
         return None
+    finally:
+        if own_lock:
+            release_lock(instance_id, execution_id)
 
 def restore_instance_from_backup(instance_id):
     print("Restoring instance...")

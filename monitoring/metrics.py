@@ -48,3 +48,19 @@ def track_remediation(completed=1, failed=0, savings=0.0):
 
 def track_accounts(count):
     publish_cloudwatch_metric("AccountCount", count)
+
+def track_idempotent_skip():
+    publish_cloudwatch_metric("IdempotentSkips", 1)
+
+def track_lock_acquired():
+    publish_cloudwatch_metric("LocksAcquired", 1)
+
+def track_lock_denied():
+    publish_cloudwatch_metric("LockDenied", 1)
+
+def track_lock_released():
+    publish_cloudwatch_metric("LockReleased", 1)
+
+def track_lock_recovered():
+    publish_cloudwatch_metric("LockRecovered", 1)
+

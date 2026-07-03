@@ -17,6 +17,82 @@ from monitoring.healthcheck import health_check
 from bootstrap.bootstrap_accounts import bootstrap_all_accounts
 from notifications.notifier import send_alert
 
+def print_locks_table():
+    import boto3
+    from datetime import datetime, timezone
+    from scanner.config import AWS_REGION, REMEDIATION_LOCKS_TABLE
+    
+    dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
+    table = dynamodb.Table(REMEDIATION_LOCKS_TABLE)
+    
+    try:
+        response = table.scan()
+        items = response.get("Items", [])
+        
+        if not items:
+            print("No active or expired locks found in the database.")
+            return
+            
+        header_fmt = "{:<18} | {:<5} | {:<15} | {:<16} | {:<16} | {:<10} | {:<10} | {:<8} | {:<20}"
+        print(header_fmt.format(
+            "RESOURCE", "TYPE", "OWNER", "EXECUTION ID", "REQUEST ID", "AGE", "TTL", "STATUS", "LAST HEARTBEAT"
+        ))
+        print("-" * 140)
+        
+        now = datetime.now(timezone.utc)
+        
+        for item in items:
+            res_id = item.get("resource_id", "Unknown")
+            res_type = item.get("resource_type", "EC2")
+            owner = item.get("lock_owner", "Unknown")
+            exec_id = item.get("execution_id", "Unknown")
+            if len(exec_id) > 13:
+                exec_id = exec_id[:13] + "..."
+            req_id = item.get("request_id", "Unknown")
+            if len(req_id) > 13:
+                req_id = req_id[:13] + "..."
+                
+            locked_at_str = item.get("locked_at", "")
+            expires_at_str = item.get("expires_at", "")
+            
+            age_str = "Unknown"
+            ttl_str = "Unknown"
+            status = "FREE"
+            
+            if locked_at_str:
+                try:
+                    locked_at = datetime.fromisoformat(locked_at_str.replace("Z", "+00:00"))
+                    age_delta = now - locked_at
+                    seconds = int(age_delta.total_seconds())
+                    if seconds < 0:
+                        seconds = 0
+                    mins, secs = divmod(seconds, 60)
+                    age_str = f"{mins}m {secs}s"
+                except Exception:
+                    pass
+                    
+            if expires_at_str:
+                try:
+                    expires_at = datetime.fromisoformat(expires_at_str.replace("Z", "+00:00"))
+                    if now < expires_at:
+                         status = "ACTIVE"
+                         time_left = expires_at - now
+                         seconds = int(time_left.total_seconds())
+                         mins, secs = divmod(seconds, 60)
+                         ttl_str = f"{mins}m {secs}s"
+                    else:
+                         status = "EXPIRED"
+                         ttl_str = "Expired"
+                except Exception:
+                    pass
+                    
+            print(header_fmt.format(
+                res_id, res_type, owner, exec_id, req_id, age_str, ttl_str, status, locked_at_str
+            ))
+            
+    except Exception as e:
+        print(f"Failed to retrieve locks from DynamoDB: {e}")
+
 def print_help():
     print(f"SentinelFinOps Engine CLI v{VERSION}")
     print("Usage: python main.py [command] [options]")
@@ -24,6 +100,7 @@ def print_help():
     print("  scan          Run optimization scans (default command)")
     print("  validate      Run enterprise installation validation")
     print("  health        Run connectivity and database healthchecks")
+    print("  locks         Show active and expired remediation locks")
     print("  bootstrap     Bootstrap Organizations member accounts (creates SentinelFinOpsExecutionRole)")
     print("  test-slack    Send an explicit Slack notification test")
     print("  report        Generate cost savings report")
@@ -60,6 +137,8 @@ if __name__ == "__main__":
             validate_installation()
         elif arg == "health":
             health_check()
+        elif arg == "locks":
+            print_locks_table()
         elif arg == "bootstrap":
             bootstrap_all_accounts()
         elif arg == "test-slack":

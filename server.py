@@ -79,31 +79,42 @@ def actions():
 
     elif action == "autofix":
         from storage.alert_state_manager import set_alert_state
+        from storage.remediation_lock import LockContentionError
+        import uuid
 
-        if resource_type == "EBS":
-            from storage.ebs_remediation_manager import delete_volume_with_snapshot
-            snapshot_id = delete_volume_with_snapshot(resource_id, account_id, account_name, region)
-            if snapshot_id:
-                set_alert_state(resource_id, "REMEDIATED")
-                return jsonify({
-                    "text": f"Resource optimized\nVolume: {resource_id}\nBackup Snapshot: {snapshot_id}\nAction: DELETE_VOLUME"
-                }), 200
+        execution_id = str(uuid.uuid4())
+        request_id = f"webhook-{uuid.uuid4()}"
+
+        try:
+            if resource_type == "EBS":
+                from storage.ebs_remediation_manager import delete_volume_with_snapshot
+                snapshot_id = delete_volume_with_snapshot(resource_id, account_id, account_name, region, execution_id=execution_id, request_id=request_id)
+                if snapshot_id:
+                    set_alert_state(resource_id, "REMEDIATED")
+                    return jsonify({
+                        "text": f"Resource optimized\nVolume: {resource_id}\nBackup Snapshot: {snapshot_id}\nAction: DELETE_VOLUME"
+                    }), 200
+                else:
+                    return jsonify({
+                        "text": f"Failed to optimize volume {resource_id} (or already remediated)"
+                    }), 500
             else:
-                return jsonify({
-                    "text": f"Failed to optimize volume {resource_id} (or already remediated)"
-                }), 500
-        else:
-            from storage.remediation_manager import stop_instance_with_backup
-            ami_id = stop_instance_with_backup(resource_id, account_id, account_name, region)
-            if ami_id:
-                set_alert_state(resource_id, "REMEDIATED")
-                return jsonify({
-                    "text": f"Resource optimized\nInstance: {resource_id}\nBackup AMI: {ami_id}\nAction: STOP_INSTANCE"
-                }), 200
-            else:
-                return jsonify({
-                    "text": f"Failed to optimize resource {resource_id}"
-                }), 500
+                from storage.remediation_manager import stop_instance_with_backup
+                ami_id = stop_instance_with_backup(resource_id, account_id, account_name, region, execution_id=execution_id, request_id=request_id)
+                if ami_id:
+                    set_alert_state(resource_id, "REMEDIATED")
+                    return jsonify({
+                        "text": f"Resource optimized\nInstance: {resource_id}\nBackup AMI: {ami_id}\nAction: STOP_INSTANCE"
+                    }), 200
+                else:
+                    return jsonify({
+                        "text": f"Failed to optimize resource {resource_id}"
+                    }), 500
+        except LockContentionError as e:
+            return jsonify({
+                "status": "already_running",
+                "text": f"Error: Resource {resource_id} is already undergoing remediation (locked by {e.owner} until {e.expires_at})."
+            }), 409
 
     msg_type = "Volume" if resource_type == "EBS" else "Instance"
     return {

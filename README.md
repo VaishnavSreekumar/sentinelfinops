@@ -74,6 +74,14 @@ For complete architectural details, see [ARCHITECTURE.md](ARCHITECTURE.md).
 ```text
 sentinelfinops/
  ├── .github/workflows/      # GitHub Action CI/CD pipelines (ci.yml & release.yml)
+ ├── ai/                     # Centralized AI reasoning package (v5.0 placeholders)
+ │    ├── contracts/         # Versioned contract API schemas (resource context, recommendations)
+ │    ├── interfaces/        # Core system abstraction layers (provider base client)
+ │    ├── providers/         # Swappable model integrations (Bedrock, OpenAI, Anthropic, Ollama)
+ │    ├── telemetry/         # Logs, metrics, and diagnostics
+ │    └── eval/              # Evaluation verification system
+ ├── policy/                 # Governance firewall package
+ │    └── rules/             # Static governance rules (e.g. production guards)
  ├── bootstrap/              # Automation tools for cross-account role boarding
  │    └── bootstrap_accounts.py
  ├── config/                 # YAML configuration settings & templates
@@ -96,6 +104,8 @@ sentinelfinops/
  │    └── owner_detector.py
  ├── storage/                # Database state clients
  │    └── alert_state_manager.py
+ ├── templates/              # Git version-controlled prompt templates
+ │    └── cost_optimizer/
  ├── validation/             # Self-check validate suite
  │    └── install_validator.py
  ├── tests/                  # Unittest suite
@@ -188,6 +198,20 @@ sequenceDiagram
     M-->>S: Return ImageId
     S-->>User: Remediation Completed (Slack Block Update)
 ```
+
+---
+
+## AI Governance Architecture Evolution (v5.0 Road Map)
+
+SentinelFinOps v5.0 evolves the platform into an AI-powered cloud optimization system utilizing cognitive reasoning bounded by a deterministic policy engine firewall:
+
+* **Canonical Contracts**: Translates raw resources into standardized, version-controlled `ResourceContextV1` schemas.
+* **AI Gateway**: Transparent interceptor management supporting cost tracking, response caching, and provider failover.
+* **Swappable Providers**: Pluggable integration client connectors supporting AWS Bedrock, OpenAI, Anthropic, and Ollama.
+* **Schema Validator**: Enforces schema correctness on structural outputs before execution.
+* **Deterministic Policy Engine**: Intercepts recommendations to enforce static compliance policies (like safety locks and tags).
+
+For more details on the evolution blueprint, see the [sentinelfinops_v5.0_rfc.md](file:///C:/Users/vaish/.gemini/antigravity-ide/brain/9d5fd9a5-638c-483a-85a5-ec417c54b78c/sentinelfinops_v5.0_rfc.md).
 
 ---
 

@@ -22,9 +22,10 @@ def health_check():
     # 1. Validate DynamoDB
     try:
         ddb = boto3.client("dynamodb", region_name=config["aws"]["default_region"])
-        # Describe one of the main tables
+        # Describe main tables
         ddb.describe_table(TableName="sentinelfinops-snoozes")
-        report["details"]["DynamoDB"] = {"status": "PASS", "message": "Successfully connected and described snoozes table."}
+        ddb.describe_table(TableName="sentinelfinops-remediation-locks")
+        report["details"]["DynamoDB"] = {"status": "PASS", "message": "Successfully connected and verified snoozes and locks tables."}
     except Exception as e:
         report["status"] = "UNHEALTHY"
         report["details"]["DynamoDB"] = {"status": "FAIL", "message": str(e)}

@@ -146,6 +146,59 @@ def validate_installation():
     except Exception as e:
         log_result("FAIL", "DynamoDB Client", f"Failed to build DynamoDB client: {e}")
 
+    # 6b. Check Lock Timeout Configuration
+    try:
+        lock_timeout = config["remediation"].get("remediation_lock_timeout_minutes")
+        if lock_timeout is not None and isinstance(lock_timeout, int) and lock_timeout > 0:
+            log_result("PASS", "Lock Timeout Configuration", f"Configured timeout: {lock_timeout} minutes")
+        else:
+            log_result("FAIL", "Lock Timeout Configuration", f"Invalid lock timeout: {lock_timeout}")
+    except Exception as e:
+        log_result("FAIL", "Lock Timeout Configuration", f"Error checking configuration: {e}")
+
+    # 6c. Check Locks Table Conditional Writes Capability
+    try:
+        from storage.remediation_lock import acquire_lock, release_lock
+        import uuid
+        
+        test_res_id = f"sentinelfinops-validator-test-lock-{uuid.uuid4()}"
+        test_exec_id = str(uuid.uuid4())
+        
+        res_a = acquire_lock(
+            resource_id=test_res_id,
+            execution_id=test_exec_id,
+            resource_type="EC2",
+            account_id="123456789012",
+            region=region,
+            lock_owner="Validator-Test"
+        )
+        
+        if res_a.status == "ACQUIRED":
+            dup_exec_id = str(uuid.uuid4())
+            res_b = acquire_lock(
+                resource_id=test_res_id,
+                execution_id=dup_exec_id,
+                resource_type="EC2",
+                account_id="123456789012",
+                region=region,
+                lock_owner="Validator-Dup"
+            )
+            
+            if res_b.status == "DENIED":
+                res_c = release_lock(test_res_id, test_exec_id)
+                if res_c.status == "RELEASED":
+                    log_result("PASS", "Distributed Locks Functional Verification", "Verified lock acquisition, concurrency check (DENIED), and release.")
+                else:
+                    log_result("FAIL", "Distributed Locks Functional Verification", f"Release failed with status: {res_c.status}")
+            else:
+                release_lock(test_res_id, test_exec_id)
+                log_result("FAIL", "Distributed Locks Functional Verification", f"Concurrency check failed: Duplicate lock acquisition returned status: {res_b.status}")
+        else:
+            log_result("FAIL", "Distributed Locks Functional Verification", f"Initial acquisition failed with status: {res_a.status}")
+            
+    except Exception as e:
+        log_result("FAIL", "Distributed Locks Functional Verification", f"Error verifying locks behavior: {e}")
+
     # 7. Check Deployed Lambda Function & Environment Variables
     lambda_func_name = "sentinelfinops-scanner"
     try:

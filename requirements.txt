@@ -12,3 +12,5 @@ six==1.17.0
 slack_sdk==3.42.0
 urllib3==2.7.0
 PyYAML==6.0.1
+pydantic>=2.0.0
+openai>=1.42.0

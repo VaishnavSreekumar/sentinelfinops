@@ -85,6 +85,9 @@ class TestInstallValidator(unittest.TestCase):
                     "pricing_api_enabled": True,
                     "cost_explorer_enabled": True
                 },
+                "remediation": {
+                    "remediation_lock_timeout_minutes": 15
+                },
                 "slack": {
                     "webhook_url": "https://hooks.slack.com/services/T/B/G"
                 }
