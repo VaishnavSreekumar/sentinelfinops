@@ -1,189 +1,356 @@
-# SentinelFinOps Architecture Documentation
+# SentinelFinOps Architecture Guide (v5.0)
 
-This document describes the enterprise-grade technical architecture, component design, data flows, and security model of the SentinelFinOps v4.5 platform.
-
----
-
-## Technical Architecture Overview
-
-SentinelFinOps is structured into five core layers:
-1. **Infrastructure & Registry Layer**: Discovers AWS accounts via AWS Organizations and scans multiple enabled regions for EC2 instances and EBS volumes.
-2. **Metrics & Decision Engine**: Evaluates average CPU usage and capacity parameters against configurations.
-3. **Audit & Identity Resolution Layer**: Tracks resource creators using CloudTrail events, logging actions to DynamoDB.
-4. **ChatOps & Alerting Layer**: Dispatches detailed notifications to Slack with action keys (Acknowledge, Snooze, Auto Fix).
-5. **State & Remediation Layer**: Manages multi-account execution locks, time-based suppressions, and backup processes (snapshots/AMIs) prior to stopping or deleting idle assets.
+This document provides a technical guide to the system design, components, interfaces, deployment patterns, and execution sequences of SentinelFinOps v5.0.
 
 ---
 
-## System Diagrams
+## 1. Overall System Architecture
 
-### 1. Deployment Architecture
-Describes the CI/CD pipeline and infrastructure provisioning path.
+SentinelFinOps is structured as a decoupled, multi-layered system separating AWS resource discovery, cognitive AI reasoning, deterministic policy enforcement, state management, and presenter alerting.
+
+```mermaid
+graph TB
+    subgraph Scheduling & Invocation
+        Scheduler["AWS EventBridge Scheduler"] -->|Hourly Trigger| Lambda["Lambda Scanner (scanner/run_scan.py)"]
+    end
+
+    subgraph Discovery & Context Collection
+        Lambda -->|AWS Organizations| MemberAcc["AWS Member Accounts"]
+        Lambda -->|CloudWatch API| CW["CPU Metrics Collection"]
+        Lambda -->|Cost APIs| Cost["Cost & Savings Estimation"]
+        Lambda -->|CloudTrail API| CT["Owner Tag Tracing"]
+    end
+
+    subgraph AIRuntime (Composition Root)
+        ScanCtx["ScanContext Schema"] -->|Context Mapping| ContextBuilder["ContextBuilder"]
+        ContextBuilder -->|Mapped JSON| AIGateway["AI Gateway Interceptor"]
+        AIGateway -->|LLM Prompt Query| Provider["Provider Abstraction (OpenAI)"]
+        Provider -->|Raw Output| SchemaValidator["Schema Validator"]
+        SchemaValidator -->|RecommendationV1| PolicyEngine["Policy Engine Firewall"]
+        PolicyEngine -->|Validation Status| TelemetryTracker["Telemetry Tracker (In-Memory)"]
+    end
+
+    subgraph State & presenter
+        PolicyEngine -->|PolicyResult| Slack["Slack presenter (notifier.py)"]
+        Slack -->|Enriched Slack Block Kit| UserChannel["Slack ChatOps Channel"]
+    end
+
+    subgraph Database State
+        Lambda -->|Snoozes & Alert States| DDB["DynamoDB Tables"]
+    end
+```
+
+---
+
+## 2. Component Architecture
+
+### Component Diagram
+
+The repository modules are partitioned into scanning, core logic, AI pipelines, policies, and storage:
+
+```mermaid
+graph TD
+    classDef default fill:#1f2937,stroke:#4b5563,stroke-width:1px,color:#f3f4f6;
+    classDef pkg fill:#1e3a8a,stroke:#3b82f6,stroke-width:1px,color:#eff6ff;
+
+    main["main.py CLI"]:::pkg --> RunScan["scanner/run_scan.py"]:::pkg
+    main --> HealthCheck["monitoring/healthcheck.py"]:::pkg
+    main --> Validator["validation/install_validator.py"]:::pkg
+    main --> Server["server.py (Slack Callback)"]:::pkg
+
+    RunScan --> AIRuntime["ai/runtime.py"]:::pkg
+    AIRuntime --> ContextBuilder["ai/context_builder.py"]:::pkg
+    AIRuntime --> AIGateway["ai/gateway.py"]:::pkg
+    AIRuntime --> SchemaValidator["ai/schema_validator.py"]:::pkg
+    AIRuntime --> PolicyEngine["policy/engine.py"]:::pkg
+    AIRuntime --> TelemetryTracker["ai/telemetry/tracker.py"]:::pkg
+
+    RunScan --> Notifier["notifications/notifier.py"]:::pkg
+    Server --> RemediationManager["storage/remediation_manager.py"]:::pkg
+    RemediationManager --> DDBLocks["storage/remediation_lock.py"]:::pkg
+```
+
+---
+
+## 3. AI Subsystem Architecture
+
+The AI reasoning layer operates as a strict validation pipeline. Raw system context is mapped to immutable contracts, processed by swappable providers, checked by structural validators, and filtered by a policy engine firewall before alerting or executing.
 
 ```mermaid
 graph LR
-    Dev["Developer"] -->|Git Push| GitHub["GitHub Repository"]
-    GitHub -->|Trigger Workflow| Actions["GitHub Actions"]
-    Actions -->|Lint/Bandit/TFsec| TF["Terraform Engine"]
-    TF -->|Deploy/Apply| AWS["AWS Management Account"]
-```
+    ScanContext["ScanContext (Raw AWS Data)"]
+    ResourceContext["ResourceContextV1 (Normalized Contract)"]
+    Gateway["AI Gateway (Prompting + LLM)"]
+    Recommendation["RecommendationV1 (Pydantic Schema)"]
+    PolicyResult["PolicyValidationResult (Governance Firewall)"]
 
-![Deployment Architecture](docs/images/deployment_architecture.svg)
+    ScanContext -->|1. ContextMapper| ResourceContext
+    ResourceContext -->|2. Gateway execute| Gateway
+    Gateway -->|3. SchemaValidator| Recommendation
+    Recommendation -->|4. PolicyEngine evaluate| PolicyResult
+```
 
 ---
 
-### 2. Runtime Architecture
-Illustrates the hourly scanner execution flow across the AWS Organization structure.
+## 4. Deployment Architecture
+
+SentinelFinOps is deployed entirely as serverless AWS infrastructure using Terraform, enforcing least-privilege permissions and zero permanent servers.
 
 ```mermaid
 graph TD
-    EventBridge["EventBridge Scheduler"] -->|Trigger 1hr| Lambda["Lambda FinOps Engine"]
-    Lambda -->|1. List Accounts| Org["AWS Organizations"]
-    Org -->|2. Return Accounts| Lambda
-    Lambda -->|3. Assume SentinelFinOpsExecutionRole| Member["Member Accounts (1..N)"]
-    Member -->|4. Scan Regions - Allow or Deny| Scan["Scan Resources"]
-    Scan -->|Fetch Metrics| CW["CloudWatch Metrics"]
-    Scan -->|Identify Creator| CT["CloudTrail Lookup"]
-    Scan -->|Publish Stats| CW_Metrics["CloudWatch Custom Metrics"]
+    subgraph "AWS Management Account"
+        EventBridge["AWS EventBridge Cron Rule"] -->|Hourly Target| LambdaScan["Lambda: sentinelfinops-scanner"]
+        FlaskServer["Flask Server (server.py)"] -->|Receives Actions| LambdaScan
+        LambdaScan -->|Read/Write State| DDB_Snooze[("sentinelfinops-snoozes")]
+        LambdaScan -->|Read/Write Alerts| DDB_AlertState[("sentinelfinops-alert-state")]
+        LambdaScan -->|Write Audit Logs| DDB_Audit[("sentinelfinops-audit")]
+        LambdaScan -->|Distributed Locks| DDB_Locks[("sentinelfinops-remediation-locks")]
+    end
+
+    subgraph "AWS Member Accounts (1..N)"
+        LambdaScan -->|STS AssumeRole| TargetRole["SentinelFinOpsExecutionRole"]
+        TargetRole -->|Metadata Scan| EC2["EC2 Instances"]
+        TargetRole -->|Metadata Scan| EBS["EBS Volumes"]
+    end
 ```
 
-![Runtime Architecture](docs/images/runtime_architecture.svg)
-
 ---
 
-### 3. Remediation Lifecycle Flow
-Shows the end-to-end flow from detection to auditable auto-fixing.
+## 5. Runtime Sequence Diagram
 
-```mermaid
-graph TD
-    Scan["Scan & Identify Idle"] -->|Trigger Alert| Slack["Slack Channel"]
-    Slack -->|User Clicks Auto Fix| Webhook["server.py (Webhook Action)"]
-    Webhook -->|Verify Lock| Lock{"Lock Acquired?"}
-    Lock -->|No| Abort["Abort Execution"]
-    Lock -->|Yes| Backup["Create Backup (Snapshot/AMI)"]
-    Backup -->|Remediate| Action["EC2 Stop / EBS Delete"]
-    Action -->|Release Lock & Audit| DynamoDB[("DynamoDB Audit History")]
-```
-
-![Remediation Flow](docs/images/remediation_flow.svg)
-
----
-
-### 4. Savings Calculation Flow
-Maps how the platform estimates waste values using real-time and fallback static resources.
-
-```mermaid
-graph TD
-    CE["Cost Explorer API"] -->|Fetch Historical Costs| Estimate["Potential Savings Engine"]
-    Pricing["AWS Pricing API"] -->|Fallback Instance Rates| Estimate
-    Static["Static Regional Tables"] -->|Offline Fallback Rates| Estimate
-    Estimate -->|Generate| Report["Cost Savings Report"]
-```
-
-![Savings Flow](docs/images/savings_flow.svg)
-
----
-
-## Architectural Decisions & Tradeoffs
-
-### 1. DynamoDB State Management
-* **Decision**: All suppression rules, remediation locks, audit history, and execution states are persisted in AWS DynamoDB tables.
-* **Tradeoff**: Offers serverless, low-latency scaling that enables cross-account execution and prevents race conditions, but incurs minimal AWS data-store charges compared to flat file solutions.
-
-### 2. AWS Organizations Role Assumption
-* **Decision**: We utilize Boto3 assume role with target role configurations rather than registering individual member accounts manually.
-* **Tradeoff**: Greatly reduces onboarding overhead (bootstrap command creates roles automatically), but requires administrative privilege (`OrganizationAccountAccessRole`) during onboarding.
-
-### 3. Non-Pinging Installation Validation
-* **Decision**: The setup validator verifies webhook connectivity by running HTTP HEAD checks to the domain root (`https://hooks.slack.com`) instead of pushing a test alert.
-* **Tradeoff**: Eliminates notifications during deployment/CI cycles while ensuring egress proxying and DNS resolution are fully functional.
-
----
-
-## Security Model
-
-1. **Least Privilege Execution Roles**: The `SentinelFinOpsExecutionRole` is granted read-only metadata permissions for scanning, and tight, resource-specific write permissions (`ec2:StopInstances`, `ec2:DeleteVolume`, `ec2:CreateSnapshot`, `ec2:CreateImage`) for remediation.
-2. **Management Account Safety**: Remediation is automatically skipped if the target resource resides in the AWS Organization Management Account.
-3. **Environment Security**: Sensitive keys and credentials are bound to environment variables or injected securely via Terraform configurations and the gitignored `config/settings.yaml`.
-
----
-
-## Distributed Coordination (v4.6)
-
-### Remediation Concurrency & Idempotency Sequence
-
-The diagram below details how SentinelFinOps ensures that concurrent webhook calls (e.g. from multiple Slack button clicks) or overlapping Lambda scans do not trigger duplicate resource remediations or duplicate backups.
+The following sequence details how a scheduled run is executed, demonstrating how AI execution is optional and falls back gracefully on any pipeline failures:
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor User as Slack User
-    participant Slack as Slack Channel
-    participant Flask as Flask Server (server.py)
-    participant Remediation as Remediation Engine (remediation_manager.py)
-    participant DDBLock as DynamoDB Locks (sentinelfinops-remediation-locks)
-    participant DDBHist as DynamoDB History (sentinelfinops-remediation-history)
-    participant Backup as AWS Backup (AMI/Snapshot)
-    participant Resource as AWS Target Resource (EC2/EBS)
-    participant Audit as DynamoDB Audit (sentinelfinops-audit)
+    participant Event as EventBridge
+    participant Scanner as run_scan.py
+    participant STS as AWS STS
+    participant AIRuntime as AIRuntime (ai/runtime.py)
+    participant Slack as Notifier (Slack)
 
-    User->>Slack: Click "Auto Fix"
-    Slack->>Flask: POST /slack/actions (execution_id)
-    Flask->>Remediation: stop_instance_with_backup(execution_id)
-    
-    Remediation->>DDBHist: Check Idempotency Key (resource_id + action + account_id)
-    Note over Remediation,DDBHist: If status == SUCCESS, skip execution immediately
-    
-    Remediation->>DDBLock: acquire_lock (PutItem Condition: attribute_not_exists)
-    
-    alt Lock Acquired
-        DDBLock-->>Remediation: ACQUIRED
-        Remediation->>Backup: create_ami_backup() / create_snapshot_backup()
-        Backup-->>Remediation: Backup ID (AMI / Snapshot)
-        Remediation->>DDBLock: renew_lock (Extend lease heartbeat)
-        Remediation->>Resource: Stop EC2 / Delete EBS
-        Remediation->>Audit: log_action("remediated")
-        Remediation->>DDBHist: record_remediation(SUCCESS)
-        Remediation->>DDBLock: release_lock (Condition: execution_id match)
-        Remediation-->>Flask: Success Response
-        Flask-->>Slack: HTTP 200 (Resource optimized)
-    else Lock Denied (Stale Lock Check)
-        DDBLock-->>Remediation: ConditionalCheckFailedException
-        Remediation->>DDBLock: get_item() (read expiry)
-        alt Lock is Active
-            Remediation-->>Flask: LockContentionError
-            Flask-->>Slack: HTTP 409 (Resource already undergoing remediation)
-        else Lock is Expired
-            Remediation->>DDBLock: acquire_lock (PutItem Condition: old_execution_id + old_expiry match)
-            alt Takeover Success
-                DDBLock-->>Remediation: RECOVERED
-                Note over Remediation: Run backup, remediation, and release...
-            else Takeover Collision
-                Note over Remediation: Retry loop up to 3 times, then return DENIED
+    Event->>Scanner: Trigger Scheduled Scan
+    Scanner->>STS: Assume Account Scanning Roles
+    STS-->>Scanner: Session Credentials
+
+    loop For Each Discovered Resource
+        Scanner->>Scanner: Retrieve Heuristics (CPU, Cost)
+        alt Resource is Active/Healthy
+            Scanner->>Scanner: Clear existing alerts
+        else Resource is Idle (Alert NEW)
+            Note over Scanner, AIRuntime: Optional AI Pipeline Execution
+            rect rgb(30, 30, 40)
+                Scanner->>AIRuntime: process(ScanContext)
+                alt AI Succeeds
+                    AIRuntime-->>Scanner: (RecommendationV1, PolicyResult)
+                else AI Fails / Exception Raised
+                    AIRuntime-->>Scanner: (None, None)
+                end
             end
+            Scanner->>Slack: send_alert(recommendation, policy_result)
+            Note over Scanner, Slack: Renders rich details if present, falls back to legacy if None
         end
     end
 ```
 
-### Core Coordination Architecture
+---
 
-#### 1. Why DynamoDB Conditional Writes?
-AWS DynamoDB supports atomic operations using `ConditionExpression` attributes. When acquiring a lock, SentinelFinOps attempts a conditional put verifying that the key `resource_id` does not exist:
-`ConditionExpression="attribute_not_exists(resource_id)"`
-If the record exists, the API atomically rejects the write with a `ConditionalCheckFailedException`, ensuring that exactly one execution thread claims the resource lock.
+## 6. Context Mapping Architecture
 
-#### 2. Why not threading.Lock or in-memory locking?
-In-memory locks (e.g. `threading.Lock`) only protect concurrent threads executing inside a single OS process container. SentinelFinOps is deployed in serverless, ephemeral environments (AWS Lambda invocations or distributed Flask application workers). An external, distributed locking provider (DynamoDB) is required to coordinate transactions across distinct compute contexts.
+Raw discovery inputs are transformed into type-safe, versioned schemas by resource mappers registered inside a MapperRegistry.
 
-#### 3. Stale Lock Recovery
-If an execution host crashes, terminates due to a Lambda timeout, or loses network connectivity mid-remediation, the lock is left in the database.
-* To prevent permanent deadlocks, locks are written with an `expires_at` ISO timestamp.
-* Subsequent attempts that receive a check failure read the lock row. If `expires_at` is in the past, they attempt an optimistic conditional write matching:
-  `ConditionExpression="execution_id = :old_exec AND expires_at = :old_exp"`
-* On success, the stale lease is safely overtaken (status `"RECOVERED"`). On collision (e.g. another concurrent run won the takeover), the worker retries up to 3 times before giving up.
+```mermaid
+classDiagram
+    class ScanContext {
+        +str resource_id
+        +ResourceType resource_type
+        +dict raw_resource
+        +MetricsSummary metrics
+        +CostSummary cost_summary
+        +OwnerInfo owner_info
+        +HistorySummary history_summary
+        +str account_id
+        +str region
+    }
 
-#### 4. Decoupled Idempotency
-Locks guarantee concurrency control (preventing overlapping runs). Idempotency guarantees once-per-resource safety (preventing repeated execution after completion).
-* Remediations check the history index database using a composite key: `resource_id + action + account_id`.
-* Even if locks expire or are released, the presence of a `SUCCESS` record with a matching idempotency key forces the remediation pipeline to return immediately without duplicate backup or stop/delete API calls.
+    class ContextMapper {
+        <<interface>>
+        +supported_resource_type : ResourceType
+        +map(ScanContext) ResourceContextV1
+    }
 
+    class EC2Mapper {
+        +map(ScanContext) ResourceContextV1
+    }
+
+    class EBSMapper {
+        +map(ScanContext) ResourceContextV1
+    }
+
+    class MapperRegistry {
+        +register(ContextMapper)
+        +get_mapper(ResourceType) ContextMapper
+    }
+
+    class ContextBuilder {
+        +build_context(ScanContext) ResourceContextV1
+    }
+
+    ScanContext --> ContextBuilder
+    ContextBuilder --> MapperRegistry
+    MapperRegistry --> ContextMapper
+    ContextMapper <|-- EC2Mapper
+    ContextMapper <|-- EBSMapper
+```
+
+---
+
+## 7. Provider Abstraction
+
+The system interacts with language models through the `LLMProvider` contract, isolating the codebase from changing API clients.
+
+```mermaid
+classDiagram
+    class LLMProvider {
+        <<interface>>
+        +model_id : str
+        +generate(system_prompt: str, user_prompt: str, response_schema: Type) Any
+    }
+
+    class OpenAIProvider {
+        +client : OpenAI
+        +generate(system_prompt: str, user_prompt: str, response_schema: Type) Any
+    }
+
+    class MockProvider {
+        +responses : list
+        +generate(system_prompt: str, user_prompt: str, response_schema: Type) Any
+    }
+
+    LLMProvider <|-- OpenAIProvider
+    LLMProvider <|-- MockProvider
+```
+
+---
+
+## 8. Policy Validation Flow
+
+The Policy Engine acts as a static compliance firewall, evaluating recommendations against deterministic rules. If any rule crashes, it fails closed immediately to protect target infrastructure.
+
+```mermaid
+graph TD
+    Rec["RecommendationV1 Input"] --> Engine["PolicyEngine.evaluate()"]
+    Engine -->|Iterate Rules| Rule1["Rule 1: ProductionGuard"]
+    Engine -->|Iterate Rules| Rule2["Rule 2: ExemptionCheck"]
+
+    Rule1 -->|Passes| R1_Ok["OK (No Violations)"]
+    Rule1 -->|Fails| R1_Fail["Violation String"]
+    Rule1 -->|Crashes| R1_Crash["Exception Captured"]
+
+    R1_Ok & R1_Fail & R1_Crash --> Aggregator["Aggregator"]
+    
+    alt Any Violations or Crashes Present
+        Aggregator -->|Status: FAILED| ResultFail["PolicyValidationResult (Blocked)"]
+    else All Rules Passed
+        Aggregator -->|Status: PASSED| ResultPass["PolicyValidationResult (Allowed)"]
+    end
+```
+
+---
+
+## 9. Telemetry Flow
+
+The Telemetry Tracker records request lifecycles passively. It performs defensive copies of internal logs to prevent caller mutation.
+
+```mermaid
+graph TD
+    Caller["AIRuntime / Evaluator"] -->|1. record_request()| Tracker["TelemetryTracker"]
+    Caller -->|2. record_response() OR record_failure()| Tracker
+    
+    Tracker -->|Append Record| InternalList["_records : list[TelemetryRecord]"]
+    
+    UserQuery["get_records()"] --> Tracker
+    Tracker -->|Deep Copy/Defensive Copy| CopiedList["list[TelemetryRecord] (Read-Only Copy)"]
+    CopiedList --> UserQuery
+```
+
+---
+
+## 10. Evaluation Framework
+
+Developers validation runs cases offline sequentially using a mock provider to verify contract compliance, policy results, and pipeline safety.
+
+```mermaid
+graph LR
+    subgraph Developer Test Suite
+        Case1["EvaluationCase 1"]
+        Case2["EvaluationCase 2"]
+    end
+
+    subgraph Evaluator Engine
+        Evaluator["Evaluator (ai/eval/evaluator.py)"]
+        AIRuntime["AIRuntime.process()"]
+    end
+
+    Case1 & Case2 -->|evaluate_all()| Evaluator
+    Evaluator -->|Sequential Process| AIRuntime
+    AIRuntime -->|Assert Policy & Actions| Evaluator
+    Evaluator -->|Output Results| ResultList["list[EvaluationResult]"]
+```
+
+---
+
+## 11. Repository Module Relationships
+
+```mermaid
+graph TD
+    subgraph Subsystems
+        Scanner["scanner/"]
+        AI["ai/"]
+        Policy["policy/"]
+        Storage["storage/"]
+        Notifications["notifications/"]
+    end
+
+    Scanner -->|Invokes| AI
+    AI -->|Validates Against| Policy
+    AI -->|Logs| Storage
+    Scanner -->|Notifies| Notifications
+    Notifications -->|Renders AI/Policy Details| Slack["Slack API"]
+```
+
+---
+
+## 12. Design Principles & Patterns
+
+1. **Single Source of Truth**: The platform ensures all components use defined configuration objects rather than hardcoded environment mappings.
+2. **Fail-Safe Processing**: The AI pipeline resides in an isolated logical compartment. If any runtime exception is thrown (such as OpenAI timeout, Pydantic validation failure, or policy rule check crashes), the execution catches the crash and falls back immediately to legacy scanning heuristics.
+3. **Immutability**: Contracts, recommendations, and execution contexts use Pydantic models configured as immutable (or frozen dataclasses) to prevent side-effect bugs.
+
+---
+
+## 13. Dependency Injection Strategy
+
+SentinelFinOps uses constructor dependency injection throughout the AI runtime layer to isolate dependency building from execution logic:
+- `AIRuntime` receives `ContextBuilder`, `AIGateway`, `SchemaValidator`, `PolicyEngine`, and `TelemetryTracker` via its constructor.
+- Dependency instantiation resides in a single **Composition Root** factory function: `create_ai_runtime()`.
+- This ensures `AIRuntime` can be tested easily by injecting mock objects, avoiding system registry state conflicts.
+
+---
+
+## 14. Extension Guide
+
+### How to Add a New Provider
+1. Inherit from `LLMProvider` in `ai/interfaces/provider.py`.
+2. Implement the `generate` signature.
+3. Register the new client implementation in the composition root `create_ai_runtime()` inside `ai/runtime.py`.
+
+### How to Add a New Policy Rule
+1. Inherit from `PolicyRule` in `policy/rules/base_rule.py`.
+2. Implement `evaluate(self, recommendation: RecommendationV1, context: Any = None)`.
+3. Add the rule to the instantiation array of `PolicyEngine` inside `create_ai_runtime()`.
+
+### How to Add a New Prompt Template
+1. Create a subdirectory under `config/prompts/` matching the prompt name.
+2. Inside that directory, create a semantic version subdirectory (e.g. `1.1.0/`).
+3. Add `system.txt` and `user.txt` templates. The `PromptRegistry` will automatically discover and sort the new templates.

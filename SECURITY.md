@@ -1,6 +1,6 @@
-# Security Policy
+# Security Policy - SentinelFinOps (v5.0)
 
-We take the security of our infrastructure management and FinOps tools seriously. If you believe you have found a security vulnerability in SentinelFinOps, please read below to report it.
+We take the security of your AWS infrastructure and AI-assisted cloud governance seriously. This document outlines our security model, credentials handling, least-privilege configurations, and instructions for reporting vulnerabilities.
 
 ## Supported Versions
 
@@ -8,8 +8,8 @@ Only the latest major version receives security updates.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 4.5.x   | :white_check_mark: |
-| 4.0.x   | :x:                |
+| 5.0.x   | :white_check_mark: |
+| 4.x     | :x:                |
 | < 4.0   | :x:                |
 
 ## Reporting a Vulnerability
@@ -25,12 +25,43 @@ Please include:
 
 We aim to acknowledge your report within 48 hours and provide a remediation timeline within 7 days.
 
-## Security Model & Principles
+---
 
-SentinelFinOps operates inside your AWS environment and handles critical resource-management actions. To ensure security, the platform enforces:
+## 1. Secrets Management & API Keys
 
-1. **Least-Privilege Execution Roles**: Cross-account role assumptions (`SentinelFinOpsExecutionRole`) are strictly configured with read-only permissions except for targeted remediation actions (like EC2 stop, volume deletion, snapshot creation).
-2. **Local Credential Sandboxing**: Secrets are stored only in environment variables or within `config/settings.yaml` (which is gitignored). They are never hardcoded or printed to stdout.
-3. **No Automated Rollouts without Dry Run Option**: All scanning and remediation actions support global `--dry-run` safety parameters.
-4. **Organizations Partitioning**: Member account scanning requires explicit STS assumption of roles. If role assumption fails, it logs the failure but continues scanning other accounts without failing the overall execution.
-5. **No Direct Webhook Ingress**: The system communicates outgoing notifications to Slack via a one-way webhook endpoint and does not listen for incoming external webhook calls unless gated by API Gateway authentication.
+- **No Hardcoded Credentials**: The platform prohibits hardcoding API keys (such as `OPENAI_API_KEY`) or target webhook URLs.
+- **Environment Isolation**: Secrets are loaded from the environment or target deployment settings using PyYAML safe loading of `config/settings.yaml` (which is gitignored).
+- **Production Safety**: Mock keys or fallback credentials are never dynamically generated in production execution environments. If API keys are missing, the AI runtime fails closed and returns control to the deterministic heuristics scanner.
+
+---
+
+## 2. Least-Privilege IAM Framework
+
+SentinelFinOps relies on a cross-account role assumption design. We enforce a separation between **read-only scanning** and **remediation write permissions** on the target `SentinelFinOpsExecutionRole` deployed in member accounts:
+
+- **Metadata Scanners (Read-Only)**:
+  - `ec2:DescribeInstances`
+  - `ec2:DescribeVolumes`
+  - `cloudwatch:GetMetricStatistics`
+  - `organizations:ListAccounts` (Management account only)
+- **Remediation Controllers (Write-Only)**:
+  - `ec2:StopInstances` (EC2 Stop)
+  - `ec2:DeleteVolume` (EBS delete)
+  - `ec2:CreateSnapshot` (EBS backup)
+  - `ec2:CreateImage` (EC2 AMI backup)
+- **Trust Boundary**: Target execution roles must configure trust relationship policies allowing only the management account ID to assume the scanning profile.
+
+---
+
+## 3. AI Governance & Prompt Safety
+
+- **Deterministic Compliance Firewall**: The AI Gateway generates optimization recommendations, but **never executes them directly**. The output `RecommendationV1` payload is intercepted by the `PolicyEngine` which enforces deterministic guardrails (such as production tag checks or safety overrides).
+- **Fail-Closed Execution**: If any governance policy check crashes, the recommendation is rejected immediately, preventing unvalidated AI output from interacting with AWS resources.
+- **Prompt Injection Defense**: The prompt registry is filesystem-backed under `config/prompts/` and is version-controlled. User inputs are serialized within structured JSON templates (`user.txt`) using the `{{ context_json }}` placeholder, separating system instructions from context variables to prevent command/prompt injection.
+
+---
+
+## 4. Remediation Safety Guardrails
+
+- **Management Account Protection**: Automated remediation is blocked on resources residing in the AWS Organization Management Account.
+- **Dry-Run Mode**: The platform supports a global `--dry-run` override configuration, allowing engineers to audit recommendations and policy outcomes in Slack without modifying AWS states.

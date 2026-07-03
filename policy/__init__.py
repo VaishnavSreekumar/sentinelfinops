@@ -4,3 +4,5 @@ Enforces deterministic gates on recommendations before actions execute.
 """
 
 from policy.engine import PolicyEngine
+
+__all__ = ["PolicyEngine"]

@@ -2,6 +2,26 @@
 
 All notable changes to the SentinelFinOps project will be documented in this file.
 
+## [v5.0.0] - 2026-07-04 (Cognitive Reasoning & Governance Firewall Integration)
+
+This release evolves the platform from a heuristic scanner into an AI-driven, policy-gated cloud optimization suite. Cognitive AI optimization recommendations are dynamically generated, structured under safe canonical contracts, filtered by a compliance policy firewall, and presented via rich ChatOps interfaces.
+
+### Added
+- **Phase 1 (AI Contracts)**: Created Pydantic models for resource mapping contexts, model recommendations (`RecommendationV1`), policy validations, telemetry metrics, and enum properties.
+- **Phase 2 (Context Mapping)**: Implemented `ContextMapper` registry featuring normalized mappings for `EC2Mapper` and `EBSMapper` to map raw boto3 results to type-safe inputs.
+- **Phase 3 (Provider Abstraction)**: Designed the swappable `LLMProvider` interface to isolate the platform from external model clients.
+- **Phase 4 (OpenAI Provider)**: Integrated OpenAI provider Client supporting structured output schema parsing, token counting, and custom API billing configurations.
+- **Phase 5 (Prompt Registry)**: Implemented a filesystem-backed, version-controlled `PromptRegistry` under `config/prompts/` supporting semantic version sorting and discovery.
+- **Phase 6 (AI Gateway)**: Created `AIGateway` to coordinate system context serialization, prompt retrieval, model execution, cost reporting, and caching.
+- **Phase 7 (Schema Validator)**: Built a strict `SchemaValidator` to validate recommendation payloads against type definitions.
+- **Phase 8 (Telemetry Subsystem)**: Created a passive event tracker (`TelemetryTracker`) logging request details, latency, and tokens with defensive copy protections.
+- **Phase 9 (Policy Engine)**: Implemented a deterministic governance firewall (`PolicyEngine`) to evaluate AI proposals against compliance rules, enforcing fail-closed guardrails on any rule crashes.
+- **Phase 10 (Slack AI presenter)**: Enhanced the Slack notifications handler to dynamically compile cost, savings, reasoning, and policy results without breaking legacy alerts.
+- **Phase 11 (Runtime Integration)**: Created `AIRuntime` composition root and factory (`create_ai_runtime()`) and wired them into the EC2 and EBS scanner loops in `run_scan.py` with dynamic account details and fail-safe exceptions handling.
+- **Phase 12 (AI Evaluation Framework)**: Implemented an offline developer validation suite (`Evaluator`, `EvaluationCase`, and `EvaluationResult`) to run sequential verification cases using mock providers.
+
+---
+
 ## [v4.5] - 2026-06-22 (Enterprise Deployment & Production Readiness)
 
 ### Added

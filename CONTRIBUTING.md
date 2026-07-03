@@ -1,64 +1,85 @@
-# Contributing to SentinelFinOps
+# Contributing to SentinelFinOps (v5.0)
 
-First off, thank you for considering contributing to SentinelFinOps! It is contributors like you who make this platform a powerful, production-ready tool.
+Thank you for contributing to SentinelFinOps! This guide covers coding standards, architectural principles, and the steps to extend the system without violating our decoupled layers.
 
-Please review these guidelines to make the contribution process smooth and successful.
+---
 
-## Code of Conduct
+## 1. Architectural Principles
 
-By participating in this project, you agree to abide by our standards of respectful, collaborative, and professional engagement.
+All contributions must adhere to the following principles:
+- **Decoupled Responsibilities**: Do not mix layers. Scanners discover resources; the AI runtime reasons; the Policy Engine enforces compliance; Slack presents notifications; storage classes manage state.
+- **Fail-Safe Integrity**: AI and LLM outputs are auxiliary. The platform must function using legacy heuristics if AI services are unavailable.
+- **Dependency Injection**: Classes (like mappers, rules, and validators) must receive their dependencies via constructor parameters. Do not load configuration files or instantiate provider client singletons inside deep logic classes.
+- **Immutability**: All contracts (subclasses of `ContractBase`) and evaluation results must be immutable to avoid side effects.
 
-## How to Contribute
+---
 
-### 1. Branch Naming Convention
-When working on features, bugfixes, or enhancements, please use the following naming convention for your branches:
-- Feature branch: `feature/short-description`
-- Bugfix branch: `bugfix/short-description`
-- Documentation: `docs/short-description`
-- Release tracking: `release/vX.Y.Z`
+## 2. Local Development Setup
 
-### 2. Local Setup
-1. **Clone the Repository:**
+1. **Clone the Repository**:
    ```bash
    git clone https://github.com/VaishnavSreekumar/sentinelfinops.git
    cd sentinelfinops
    ```
-2. **Setup Virtual Environment:**
+2. **Setup Virtual Environment**:
    ```bash
    python -m venv venv
-   source venv/bin/activate  # On Windows use: .\venv\Scripts\activate
+   source venv/bin/activate  # On Windows: .\venv\Scripts\activate
    ```
-3. **Install Pinned Dependencies:**
+3. **Install Dependencies**:
    ```bash
    pip install -r requirements.txt
    ```
-4. **Copy Configuration Template:**
+4. **Setup Local Config**:
    ```bash
    cp config/settings.example.yaml config/settings.yaml
-   # Populate config/settings.yaml with your development target settings (it is gitignored)
+   # Edit settings.yaml to match your sandbox environment
    ```
 
-### 3. Coding Style & Linting
-We adhere to PEP8 guidelines for Python code. Before opening a Pull Request, run `flake8` to inspect syntax:
-```bash
-flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-```
+---
 
-### 4. Running Security Scans
-Security is paramount in FinOps operations. Verify that your updates do not introduce vulnerabilities:
-- **Python scan:** `bandit -r . -x ./venv,./lambda_package`
-- **Terraform scan:** `tfsec terraform/`
+## 3. Extension Guides
 
-### 5. Running Tests
-You must write unit tests for any new behavior. To execute the test suite:
-```bash
-python -m unittest discover -s tests
-```
-Ensure code coverage for your components is at or above **80%**.
+### How to Add a New Context Mapper
+1. Create a new mapper class (e.g., `RDSMapper`) inheriting from `ContextMapper` in `ai/context/`.
+2. Implement `supported_resource_type` to return the target resource type.
+3. Implement `map(self, scan_context: ScanContext) -> ResourceContextV1` to transform raw parameters into the normalized contract.
+4. Register the new mapper class in the `create_ai_runtime` factory function inside `ai/runtime.py`.
 
-### 6. Pull Request Process
-1. Push your branch to your origin fork.
-2. Open a Pull Request against the `main` branch.
-3. Describe the change, the reason it is needed, and your verification steps.
-4. Ensure the GitHub Actions CI workflow successfully passes (linting, bandit, tfsec, and tests).
-5. Address any reviewer feedback.
+### How to Add a New LLM Provider
+1. Create a new provider class (e.g., `AnthropicProvider`) inheriting from `LLMProvider` in `ai/interfaces/provider.py`.
+2. Implement the `generate(self, system_prompt: str, user_prompt: str, response_schema: Type) -> Any` method.
+3. Handle authentication using keys passed through the provider's `config` dictionary argument.
+4. Register the provider instantiation key inside `create_ai_runtime()` inside `ai/runtime.py`.
+
+### How to Add a New Prompt Template
+1. Create a directory inside `config/prompts/` matching the prompt name (e.g., `config/prompts/idle_db/`).
+2. Create a semantic version directory (e.g., `1.0.0/`).
+3. Add `system.txt` (defining role/rules) and `user.txt` (containing contextual variables like `{{ context_json }}`).
+4. The `PromptRegistry` will automatically discover and load the latest version.
+
+### How to Add a New Policy Rule
+1. Create a subclass in `policy/rules/` (e.g., `policy/rules/critical_tag.py`) inheriting from `PolicyRule` in `policy/rules/base_rule.py`.
+2. Implement `evaluate(self, recommendation: RecommendationV1, context: Any = None) -> Union[bool, List[str]]`.
+3. If validation fails, return a list of string violations. If it passes, return `True`.
+4. Register the rule instance in the `create_ai_runtime` composition root's policy engine ruleset in `ai/runtime.py`.
+
+---
+
+## 4. Coding & Testing Standards
+
+- **Static Type Hinting**: All new methods and functions must specify type annotations.
+- **PEP 8 Linting**: Run `flake8` to scan for style violations:
+  ```bash
+  flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+  ```
+- **Security Check**: Run `bandit` and `tfsec` to verify security health:
+  ```bash
+  bandit -r . -x ./venv,./lambda_package
+  tfsec terraform/
+  ```
+- **Unit Testing**: You must write unit tests for all classes. Execute the test suite using:
+  ```bash
+  python -m unittest discover -s tests -p "test_*.py"
+  ```
+- **Coverage**: Keep overall test coverage above **80%**.
