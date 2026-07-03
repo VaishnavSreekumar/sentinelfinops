@@ -9,33 +9,33 @@ This document provides a technical guide to the system design, components, inter
 SentinelFinOps is structured as a decoupled, multi-layered system separating AWS resource discovery, cognitive AI reasoning, deterministic policy enforcement, state management, and presenter alerting.
 
 ```mermaid
-graph TB
-    subgraph Scheduling & Invocation
-        Scheduler["AWS EventBridge Scheduler"] -->|Hourly Trigger| Lambda["Lambda Scanner (scanner/run_scan.py)"]
+flowchart TD
+    subgraph Scheduling["Scheduling & Invocation"]
+        Scheduler["AWS EventBridge Scheduler"] -->|Hourly Trigger| Lambda["Lambda Scanner (run_scan.py)"]
     end
 
-    subgraph Discovery & Context Collection
+    subgraph Discovery["Discovery & Context Collection"]
         Lambda -->|AWS Organizations| MemberAcc["AWS Member Accounts"]
         Lambda -->|CloudWatch API| CW["CPU Metrics Collection"]
         Lambda -->|Cost APIs| Cost["Cost & Savings Estimation"]
         Lambda -->|CloudTrail API| CT["Owner Tag Tracing"]
     end
 
-    subgraph AIRuntime (Composition Root)
+    subgraph Runtime["AIRuntime (Composition Root)"]
         ScanCtx["ScanContext Schema"] -->|Context Mapping| ContextBuilder["ContextBuilder"]
         ContextBuilder -->|Mapped JSON| AIGateway["AI Gateway Interceptor"]
-        AIGateway -->|LLM Prompt Query| Provider["Provider Abstraction (OpenAI)"]
+        AIGateway -->|LLM Prompt Query| Provider["Provider Abstraction"]
         Provider -->|Raw Output| SchemaValidator["Schema Validator"]
         SchemaValidator -->|RecommendationV1| PolicyEngine["Policy Engine Firewall"]
-        PolicyEngine -->|Validation Status| TelemetryTracker["Telemetry Tracker (In-Memory)"]
+        PolicyEngine -->|Validation Status| TelemetryTracker["Telemetry Tracker"]
     end
 
-    subgraph State & presenter
-        PolicyEngine -->|PolicyResult| Slack["Slack presenter (notifier.py)"]
+    subgraph Presenter["State & Presentation"]
+        PolicyEngine -->|PolicyResult| Slack["Slack Presenter"]
         Slack -->|Enriched Slack Block Kit| UserChannel["Slack ChatOps Channel"]
     end
 
-    subgraph Database State
+    subgraph DB["Database State"]
         Lambda -->|Snoozes & Alert States| DDB["DynamoDB Tables"]
     end
 ```
@@ -49,25 +49,22 @@ graph TB
 The repository modules are partitioned into scanning, core logic, AI pipelines, policies, and storage:
 
 ```mermaid
-graph TD
-    classDef default fill:#1f2937,stroke:#4b5563,stroke-width:1px,color:#f3f4f6;
-    classDef pkg fill:#1e3a8a,stroke:#3b82f6,stroke-width:1px,color:#eff6ff;
+flowchart TD
+    main["main.py CLI"] --> RunScan["scanner/run_scan.py"]
+    main --> HealthCheck["monitoring/healthcheck.py"]
+    main --> Validator["validation/install_validator.py"]
+    main --> Server["server.py (Slack Callback)"]
 
-    main["main.py CLI"]:::pkg --> RunScan["scanner/run_scan.py"]:::pkg
-    main --> HealthCheck["monitoring/healthcheck.py"]:::pkg
-    main --> Validator["validation/install_validator.py"]:::pkg
-    main --> Server["server.py (Slack Callback)"]:::pkg
+    RunScan --> AIRuntime["ai/runtime.py"]
+    AIRuntime --> ContextBuilder["ai/context_builder.py"]
+    AIRuntime --> AIGateway["ai/gateway.py"]
+    AIRuntime --> SchemaValidator["ai/schema_validator.py"]
+    AIRuntime --> PolicyEngine["policy/engine.py"]
+    AIRuntime --> TelemetryTracker["ai/telemetry/tracker.py"]
 
-    RunScan --> AIRuntime["ai/runtime.py"]:::pkg
-    AIRuntime --> ContextBuilder["ai/context_builder.py"]:::pkg
-    AIRuntime --> AIGateway["ai/gateway.py"]:::pkg
-    AIRuntime --> SchemaValidator["ai/schema_validator.py"]:::pkg
-    AIRuntime --> PolicyEngine["policy/engine.py"]:::pkg
-    AIRuntime --> TelemetryTracker["ai/telemetry/tracker.py"]:::pkg
-
-    RunScan --> Notifier["notifications/notifier.py"]:::pkg
-    Server --> RemediationManager["storage/remediation_manager.py"]:::pkg
-    RemediationManager --> DDBLocks["storage/remediation_lock.py"]:::pkg
+    RunScan --> Notifier["notifications/notifier.py"]
+    Server --> RemediationManager["storage/remediation_manager.py"]
+    RemediationManager --> DDBLocks["storage/remediation_lock.py"]
 ```
 
 ---
@@ -77,17 +74,11 @@ graph TD
 The AI reasoning layer operates as a strict validation pipeline. Raw system context is mapped to immutable contracts, processed by swappable providers, checked by structural validators, and filtered by a policy engine firewall before alerting or executing.
 
 ```mermaid
-graph LR
-    ScanContext["ScanContext (Raw AWS Data)"]
-    ResourceContext["ResourceContextV1 (Normalized Contract)"]
-    Gateway["AI Gateway (Prompting + LLM)"]
-    Recommendation["RecommendationV1 (Pydantic Schema)"]
-    PolicyResult["PolicyValidationResult (Governance Firewall)"]
-
-    ScanContext -->|1. ContextMapper| ResourceContext
-    ResourceContext -->|2. Gateway execute| Gateway
-    Gateway -->|3. SchemaValidator| Recommendation
-    Recommendation -->|4. PolicyEngine evaluate| PolicyResult
+flowchart LR
+    ScanContext["ScanContext (Raw AWS Data)"] -->|1. ContextMapper| ResourceContext["ResourceContextV1 (Normalized Contract)"]
+    ResourceContext -->|2. Gateway execute| Gateway["AI Gateway (Prompting + LLM)"]
+    Gateway -->|3. SchemaValidator| Recommendation["RecommendationV1 (Pydantic Schema)"]
+    Recommendation -->|4. PolicyEngine evaluate| PolicyResult["PolicyValidationResult (Governance Firewall)"]
 ```
 
 ---
@@ -97,8 +88,8 @@ graph LR
 SentinelFinOps is deployed entirely as serverless AWS infrastructure using Terraform, enforcing least-privilege permissions and zero permanent servers.
 
 ```mermaid
-graph TD
-    subgraph "AWS Management Account"
+flowchart TD
+    subgraph Management["AWS Management Account"]
         EventBridge["AWS EventBridge Cron Rule"] -->|Hourly Target| LambdaScan["Lambda: sentinelfinops-scanner"]
         FlaskServer["Flask Server (server.py)"] -->|Receives Actions| LambdaScan
         LambdaScan -->|Read/Write State| DDB_Snooze[("sentinelfinops-snoozes")]
@@ -107,7 +98,7 @@ graph TD
         LambdaScan -->|Distributed Locks| DDB_Locks[("sentinelfinops-remediation-locks")]
     end
 
-    subgraph "AWS Member Accounts (1..N)"
+    subgraph Members["AWS Member Accounts"]
         LambdaScan -->|STS AssumeRole| TargetRole["SentinelFinOpsExecutionRole"]
         TargetRole -->|Metadata Scan| EC2["EC2 Instances"]
         TargetRole -->|Metadata Scan| EBS["EBS Volumes"]
@@ -138,17 +129,13 @@ sequenceDiagram
         alt Resource is Active/Healthy
             Scanner->>Scanner: Clear existing alerts
         else Resource is Idle (Alert NEW)
-            Note over Scanner, AIRuntime: Optional AI Pipeline Execution
-            rect rgb(30, 30, 40)
-                Scanner->>AIRuntime: process(ScanContext)
-                alt AI Succeeds
-                    AIRuntime-->>Scanner: (RecommendationV1, PolicyResult)
-                else AI Fails / Exception Raised
-                    AIRuntime-->>Scanner: (None, None)
-                end
+            Scanner->>AIRuntime: process(ScanContext)
+            alt AI Succeeds
+                AIRuntime-->>Scanner: (RecommendationV1, PolicyResult)
+            else AI Fails / Exception Raised
+                AIRuntime-->>Scanner: (None, None)
             end
             Scanner->>Slack: send_alert(recommendation, policy_result)
-            Note over Scanner, Slack: Renders rich details if present, falls back to legacy if None
         end
     end
 ```
@@ -174,7 +161,6 @@ classDiagram
     }
 
     class ContextMapper {
-        <<interface>>
         +supported_resource_type : ResourceType
         +map(ScanContext) ResourceContextV1
     }
@@ -212,19 +198,18 @@ The system interacts with language models through the `LLMProvider` contract, is
 ```mermaid
 classDiagram
     class LLMProvider {
-        <<interface>>
         +model_id : str
-        +generate(system_prompt: str, user_prompt: str, response_schema: Type) Any
+        +generate(system_prompt, user_prompt, response_schema)
     }
 
     class OpenAIProvider {
         +client : OpenAI
-        +generate(system_prompt: str, user_prompt: str, response_schema: Type) Any
+        +generate(system_prompt, user_prompt, response_schema)
     }
 
     class MockProvider {
         +responses : list
-        +generate(system_prompt: str, user_prompt: str, response_schema: Type) Any
+        +generate(system_prompt, user_prompt, response_schema)
     }
 
     LLMProvider <|-- OpenAIProvider
@@ -238,22 +223,23 @@ classDiagram
 The Policy Engine acts as a static compliance firewall, evaluating recommendations against deterministic rules. If any rule crashes, it fails closed immediately to protect target infrastructure.
 
 ```mermaid
-graph TD
+flowchart TD
     Rec["RecommendationV1 Input"] --> Engine["PolicyEngine.evaluate()"]
-    Engine -->|Iterate Rules| Rule1["Rule 1: ProductionGuard"]
-    Engine -->|Iterate Rules| Rule2["Rule 2: ExemptionCheck"]
+    Engine --> Rule1["Rule 1: ProductionGuard"]
+    Engine --> Rule2["Rule 2: ExemptionCheck"]
 
-    Rule1 -->|Passes| R1_Ok["OK (No Violations)"]
-    Rule1 -->|Fails| R1_Fail["Violation String"]
-    Rule1 -->|Crashes| R1_Crash["Exception Captured"]
+    Rule1 --> R1_Ok["OK (No Violations)"]
+    Rule1 --> R1_Fail["Violation String"]
+    Rule1 --> R1_Crash["Exception Captured"]
 
-    R1_Ok & R1_Fail & R1_Crash --> Aggregator["Aggregator"]
+    R1_Ok --> Aggregator["Aggregator"]
+    R1_Fail --> Aggregator
+    R1_Crash --> Aggregator
     
-    alt Any Violations or Crashes Present
-        Aggregator -->|Status: FAILED| ResultFail["PolicyValidationResult (Blocked)"]
-    else All Rules Passed
-        Aggregator -->|Status: PASSED| ResultPass["PolicyValidationResult (Allowed)"]
-    end
+    Aggregator --> Decision{"Any Violations or Crashes?"}
+    
+    Decision -->|Yes| ResultFail["PolicyValidationResult (Blocked)"]
+    Decision -->|No| ResultPass["PolicyValidationResult (Allowed)"]
 ```
 
 ---
@@ -263,11 +249,11 @@ graph TD
 The Telemetry Tracker records request lifecycles passively. It performs defensive copies of internal logs to prevent caller mutation.
 
 ```mermaid
-graph TD
+flowchart TD
     Caller["AIRuntime / Evaluator"] -->|1. record_request()| Tracker["TelemetryTracker"]
     Caller -->|2. record_response() OR record_failure()| Tracker
     
-    Tracker -->|Append Record| InternalList["_records : list[TelemetryRecord]"]
+    Tracker --> InternalList["_records : list[TelemetryRecord]"]
     
     UserQuery["get_records()"] --> Tracker
     Tracker -->|Deep Copy/Defensive Copy| CopiedList["list[TelemetryRecord] (Read-Only Copy)"]
@@ -281,18 +267,19 @@ graph TD
 Developers validation runs cases offline sequentially using a mock provider to verify contract compliance, policy results, and pipeline safety.
 
 ```mermaid
-graph LR
-    subgraph Developer Test Suite
+flowchart LR
+    subgraph DevSuite["Developer Test Suite"]
         Case1["EvaluationCase 1"]
         Case2["EvaluationCase 2"]
     end
 
-    subgraph Evaluator Engine
-        Evaluator["Evaluator (ai/eval/evaluator.py)"]
+    subgraph Engine["Evaluator Engine"]
+        Evaluator["Evaluator (evaluator.py)"]
         AIRuntime["AIRuntime.process()"]
     end
 
-    Case1 & Case2 -->|evaluate_all()| Evaluator
+    Case1 -->|evaluate_all()| Evaluator
+    Case2 -->|evaluate_all()| Evaluator
     Evaluator -->|Sequential Process| AIRuntime
     AIRuntime -->|Assert Policy & Actions| Evaluator
     Evaluator -->|Output Results| ResultList["list[EvaluationResult]"]
@@ -303,7 +290,7 @@ graph LR
 ## 11. Repository Module Relationships
 
 ```mermaid
-graph TD
+flowchart TD
     subgraph Subsystems
         Scanner["scanner/"]
         AI["ai/"]
@@ -348,7 +335,8 @@ SentinelFinOps uses constructor dependency injection throughout the AI runtime l
 ### How to Add a New Policy Rule
 1. Inherit from `PolicyRule` in `policy/rules/base_rule.py`.
 2. Implement `evaluate(self, recommendation: RecommendationV1, context: Any = None)`.
-3. Add the rule to the instantiation array of `PolicyEngine` inside `create_ai_runtime()`.
+3. If validation fails, return a list of string violations. If it passes, return `True`.
+4. Register the rule instance in the `create_ai_runtime` composition root's policy engine ruleset in `ai/runtime.py`.
 
 ### How to Add a New Prompt Template
 1. Create a subdirectory under `config/prompts/` matching the prompt name.

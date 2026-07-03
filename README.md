@@ -61,7 +61,7 @@ Traditional cost scanners rely on simple static heuristics (e.g., CPU < 5% = del
 At a high level, SentinelFinOps operates in a closed loop. The scheduled runner discovers AWS resource metadata. It packages the raw parameters into a normalized `ScanContext` and passes it to the `AIRuntime`. The runtime translates this data into a schema-validated prompt context, fetches suggestions from the configured language model, and checks them against compliance policies. Validated recommendations are dispatched to Slack as interactive Block Kit cards, where engineers can approve, snooze, or reject them.
 
 ```mermaid
-graph LR
+flowchart LR
     Scanner["run_scan (Discovery)"] -->|ScanContext| AIRuntime["AIRuntime (Reasoning)"]
     AIRuntime -->|Compliance Firewall| PolicyEngine["PolicyEngine (Filtering)"]
     PolicyEngine -->|Recommendation + PolicyResult| Slack["Slack presenter (Alerting)"]
@@ -85,7 +85,7 @@ Ensure Python 3.11+ is installed:
 # Initialize venv
 python -m venv venv
 
-# Activate venv
+# Hack to activate venv
 # On macOS/Linux:
 source venv/bin/activate
 # On Windows:
@@ -152,7 +152,7 @@ Configuration parameters are loaded from YAML, environment overrides, and the lo
 When a scheduled scan runs, the system performs the following actions:
 
 ```mermaid
-graph TD
+flowchart TD
     Trigger["1. EventBridge Timer Fires"] --> Discovery["2. List Member Accounts & Scan Regions"]
     Discovery --> IdleCheck["3. Filter Idle EC2 (CPU < Threshold) & Unattached EBS"]
     IdleCheck --> StateCheck["4. Check if Snoozed or Already Alerted in DynamoDB"]
@@ -202,6 +202,68 @@ Review our complete hardware, routing, and logic layers in the System Diagram se
 
 ### Remediation Concurrency Control
 Review the concurrency locking sequence describing how DynamoDB prevents concurrent double-remediation actions in [ARCHITECTURE.md](ARCHITECTURE.md#11-distributed-coordination-v46).
+
+Below is the execution flow of locking safety:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as Slack User / EventBridge
+    participant S as server.py / Callback
+    participant M as remediation_manager
+    participant L as remediation_lock
+    participant AWS as AWS (EC2/EBS)
+    participant DDB as DynamoDB (locks/history)
+
+    User->>S: Trigger Remediation (Slack/Cron)
+    S->>M: stop_instance_with_backup(resource_id)
+    activate M
+    M->>DDB: Check History (Idempotency Guard)
+    DDB-->>M: SUCCESS exists? (Yes -> IDEMPOTENT_SKIP)
+    
+    Note over M, L: Concurrency Lock Acquisition
+    M->>L: acquire_lock(resource_id)
+    L->>DDB: PutItem with attribute_not_exists (TTL set)
+    alt Lock Acquired (Success)
+        DDB-->>L: Success
+        L-->>M: LockResult(ACQUIRED)
+    else Lock Contention (Active)
+        DDB-->>L: ConditionalCheckFailedException
+        L->>DDB: GetItem (Check Expiry)
+        DDB-->>L: Lock Item (Not Expired)
+        L-->>M: raise LockContentionError (409 response)
+    else Stale Lock (Lease Expired)
+        DDB-->>L: ConditionalCheckFailedException
+        L->>DDB: GetItem (Check Expiry)
+        DDB-->>L: Lock Item (Expired)
+        L->>DDB: PutItem (Condition: old_execution_id & old_expires_at)
+        DDB-->>L: Success (Optimistic Lease Recovery)
+        L-->>M: LockResult(RECOVERED)
+    end
+
+    M->>AWS: Create AMI Backup
+    AWS-->>M: ImageId
+    
+    Note over M, L: Heartbeat Lease Renewal & TTL update
+    M->>L: renew_lock(resource_id, execution_id)
+    L->>DDB: UpdateItem (Condition: execution_id, Set new expiry/TTL)
+    DDB-->>L: Success
+    L-->>M: LockResult(RENEWED)
+
+    M->>AWS: Stop Instance
+    AWS-->>M: Success
+
+    M->>DDB: Record SUCCESS (Audit / History / Savings)
+    
+    M->>L: release_lock(resource_id, execution_id)
+    L->>DDB: DeleteItem (Condition: execution_id)
+    DDB-->>L: Success
+    L-->>M: LockResult(RELEASED)
+    
+    deactivate M
+    M-->>S: Return ImageId
+    S-->>User: Remediation Completed (Slack Block Update)
+```
 
 ---
 
