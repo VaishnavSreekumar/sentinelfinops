@@ -172,16 +172,13 @@ def create_ai_runtime(config: Optional[dict] = None) -> AIRuntime:
     context_builder = ContextBuilder(mapper_registry)
 
     # 2. Build Provider
-    if provider_name.lower() == "mock":
-        from ai.providers.mock_provider import MockProvider
-        provider = MockProvider(model_id=model_id, config=ai_cfg)
-        print("AI Provider: MockProvider")
-    else:
-        provider = OpenAIProvider(
-            model_id=model_id,
-            config={"api_key": api_key, **ai_cfg}
-        )
-        print("AI Provider: OpenAIProvider")
+    from ai.providers.factory import LLMProviderFactory
+    provider = LLMProviderFactory.create(
+        provider_name=provider_name,
+        model_id=model_id,
+        config={"api_key": api_key, **ai_cfg}
+    )
+    print(f"AI Provider: {provider.__class__.__name__}")
 
     # 3. Build prompt registry
     prompt_registry = PromptRegistry(prompts_dir)
