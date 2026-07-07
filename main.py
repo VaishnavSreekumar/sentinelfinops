@@ -3,8 +3,8 @@ import os
 from dotenv import load_dotenv
 
 # Load environment overrides from local files
-load_dotenv(".env")
-load_dotenv(".ENV")
+load_dotenv(".env", override=True)
+load_dotenv(".ENV", override=True)
 
 # Check for global --dry-run CLI flag and set environment override before importing config
 if "--dry-run" in sys.argv:
