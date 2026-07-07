@@ -83,7 +83,7 @@ class AIRuntime:
             self.schema_validator.validate(recommendation)
 
             # 4. Evaluate against deterministic policy rules
-            policy_result = self.policy_engine.evaluate(recommendation)
+            policy_result = self.policy_engine.evaluate(recommendation, scan_context)
 
             # 5. Record final metadata to telemetry
             end_time = datetime.utcnow()
