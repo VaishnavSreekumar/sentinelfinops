@@ -115,7 +115,7 @@ class TestAIRuntimeIntegration(unittest.TestCase):
         mock_rule.assert_called_once()
         args = mock_rule.call_args[0]
         self.assertEqual(args[0].resource_id, "i-123456")
-        self.assertIsNone(args[1])  # context must be None
+        self.assertEqual(args[1].resource_id, "i-123456")
 
         # Verify Slack post payload contained AI & Policy details
         mock_post.assert_called_once()
