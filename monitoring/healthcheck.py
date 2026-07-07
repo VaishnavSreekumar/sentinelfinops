@@ -37,8 +37,21 @@ def health_check():
             org.describe_organization()
             report["details"]["Organizations"] = {"status": "PASS", "message": "AWS Organizations described successfully."}
         except Exception as e:
-            report["status"] = "UNHEALTHY"
-            report["details"]["Organizations"] = {"status": "FAIL", "message": str(e)}
+            # Check if it's due to account not being in an organization
+            is_not_in_org = False
+            if hasattr(e, "response") and isinstance(e.response, dict):
+                error_code = e.response.get("Error", {}).get("Code")
+                if error_code == "AWSOrganizationsNotInUseException":
+                    is_not_in_org = True
+            
+            if is_not_in_org:
+                report["details"]["Organizations"] = {
+                    "status": "OPTIONAL",
+                    "message": "Account is not a member of an AWS Organization. Single-account scanning will be used as a fallback."
+                }
+            else:
+                report["status"] = "UNHEALTHY"
+                report["details"]["Organizations"] = {"status": "FAIL", "message": str(e)}
     else:
         report["details"]["Organizations"] = {"status": "WARNING", "message": "Organizations support disabled in configurations."}
         

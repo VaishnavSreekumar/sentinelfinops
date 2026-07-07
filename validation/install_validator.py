@@ -91,7 +91,14 @@ def validate_installation():
             org.describe_organization()
             log_result("PASS", "AWS Organizations Permissions", "DescribeOrganization call succeeded.")
         except Exception as e:
-            log_result("FAIL", "AWS Organizations Permissions", f"DescribeOrganization call failed: {e}")
+            error_code = ""
+            if hasattr(e, "response") and isinstance(e.response, dict):
+                error_code = e.response.get("Error", {}).get("Code")
+                
+            if error_code == "AWSOrganizationsNotInUseException":
+                log_result("WARNING", "AWS Organizations Permissions", "Account is not a member of an AWS Organization. Single-account scanning will be used as a fallback.")
+            else:
+                log_result("FAIL", "AWS Organizations Permissions", f"DescribeOrganization call failed: {e}")
     else:
         log_result("WARNING", "AWS Organizations Permissions", "Organizations integration disabled in configuration settings.")
 
