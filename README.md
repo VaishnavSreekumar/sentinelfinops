@@ -174,6 +174,36 @@ When the `AIRuntime` processes a resource, it executes the following sequence:
 6. **Telemetry**: Logs model latency, token usage, validation statuses, and errors to the database.
 7. **Slack Formatting**: Compiles the final alert block containing recommendation details and policy violations.
 
+### 8.1. AI Provider Selection & Offline Development
+
+The platform supports multiple AI providers through Provider Abstraction. You can switch between providers using the `OPENAI_PROVIDER` environment variable (or the `ai.provider` configuration in `settings.yaml`):
+
+#### Running with MockProvider (Offline/Testing)
+To run the scanner using the local, deterministic provider without requiring internet access or OpenAI credits:
+```bash
+# Windows PowerShell
+$env:OPENAI_PROVIDER="mock"
+python main.py scan
+```
+When active, the CLI prints:
+`AI Provider: MockProvider`
+
+#### Running with OpenAIProvider (Production)
+To run the scanner using the live OpenAI API:
+```bash
+# Windows PowerShell
+$env:OPENAI_PROVIDER="openai"
+$env:OPENAI_API_KEY="your-api-key"
+python main.py scan
+```
+When active, the CLI prints:
+`AI Provider: OpenAIProvider`
+
+#### Design Rationale & Best Practices
+* **Reproducibility**: In automated operations, we must guarantee that a specific AWS resource state consistently yields the same recommendation during testing.
+* **Offline Local Development**: Enables developers to construct, modify, and test the entire discovery-reasoning-governance loop locally without hitting API rate limits or incurring OpenAI credit costs.
+* **CI Integration**: Allows continuous integration pipelines to execute the complete AI runtime, policy firewall, and telemetry subsystem under simulated workloads without needing live network endpoints or API secrets.
+
 ---
 
 ## 9. Repository Structure

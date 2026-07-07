@@ -156,7 +156,7 @@ def create_ai_runtime(config: Optional[dict] = None) -> AIRuntime:
     ai_cfg = cfg.get("ai", {})
 
     # Retrieve values cleanly from config with env overrides and safe defaults
-    provider_name = ai_cfg.get("provider", os.getenv("AI_PROVIDER", "openai"))
+    provider_name = ai_cfg.get("provider", os.getenv("OPENAI_PROVIDER", os.getenv("AI_PROVIDER", "openai")))
     model_id = ai_cfg.get("model_id", os.getenv("AI_MODEL_ID", "gpt-4o"))
     api_key = ai_cfg.get("api_key", os.getenv("OPENAI_API_KEY", ""))
 
@@ -175,11 +175,13 @@ def create_ai_runtime(config: Optional[dict] = None) -> AIRuntime:
     if provider_name.lower() == "mock":
         from ai.providers.mock_provider import MockProvider
         provider = MockProvider(model_id=model_id, config=ai_cfg)
+        print("AI Provider: MockProvider")
     else:
         provider = OpenAIProvider(
             model_id=model_id,
             config={"api_key": api_key, **ai_cfg}
         )
+        print("AI Provider: OpenAIProvider")
 
     # 3. Build prompt registry
     prompt_registry = PromptRegistry(prompts_dir)
