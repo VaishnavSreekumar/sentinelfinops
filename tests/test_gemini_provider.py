@@ -4,7 +4,7 @@ Unit tests for the direct REST GeminiProvider implementation.
 import unittest
 from unittest.mock import patch, MagicMock
 from pydantic import BaseModel
-from ai.providers.gemini import GeminiProvider, GeminiProviderError, dereference_schema
+from ai.providers.gemini import GeminiProvider, GeminiProviderError, clean_and_dereference_schema
 
 class MockSchema(BaseModel):
     name: str
@@ -12,17 +12,21 @@ class MockSchema(BaseModel):
 
 class TestGeminiProvider(unittest.TestCase):
     def test_dereference_schema(self):
-        """Assert that local definitions refs are correctly resolved and flattened."""
+        """Assert that local definitions refs are resolved, additionalProperties are removed, and const maps to enum."""
         raw_schema = {
             "properties": {
-                "val": {"$ref": "#/$defs/MyEnum"}
+                "val": {"$ref": "#/$defs/MyEnum"},
+                "constant": {"const": "fixed_val"}
             },
+            "additionalProperties": False,
             "$defs": {
                 "MyEnum": {"type": "string", "enum": ["A", "B"]}
             }
         }
-        flat = dereference_schema(raw_schema)
+        flat = clean_and_dereference_schema(raw_schema)
         self.assertEqual(flat["properties"]["val"], {"type": "string", "enum": ["A", "B"]})
+        self.assertEqual(flat["properties"]["constant"], {"enum": ["fixed_val"]})
+        self.assertNotIn("additionalProperties", flat)
         self.assertNotIn("$defs", flat)
 
     @patch("requests.post")

@@ -17,12 +17,17 @@ class GeminiProviderError(Exception):
     """
     pass
 
-def dereference_schema(schema: dict) -> dict:
+def clean_and_dereference_schema(schema: dict) -> dict:
     """
-    Recursively replaces $ref definitions with their actual content to produce a flat schema compatible with Gemini.
+    Cleans, dereferences, and sanitizes a Pydantic JSON schema to be 100% compliant with the Gemini API.
+    Specifically:
+      - Resolves and replaces '$ref' nodes inline.
+      - Removes 'additionalProperties'.
+      - Replaces Pydantic's 'const' (from Literals) with 'enum'.
+      - Removes top-level '$defs' and 'definitions'.
     """
     defs = schema.get("$defs", {}) or schema.get("definitions", {})
-    
+
     def resolve(node):
         if isinstance(node, dict):
             if "$ref" in node:
@@ -30,14 +35,21 @@ def dereference_schema(schema: dict) -> dict:
                 ref_name = ref_path.split("/")[-1]
                 if ref_name in defs:
                     return resolve(defs[ref_name])
-            return {k: resolve(v) for k, v in node.items()}
+            
+            clean_node = {}
+            for k, v in node.items():
+                if k == "additionalProperties":
+                    continue
+                elif k == "const":
+                    clean_node["enum"] = [v]
+                elif k not in ("$defs", "definitions"):
+                    clean_node[k] = resolve(v)
+            return clean_node
         elif isinstance(node, list):
             return [resolve(item) for item in node]
         return node
 
     flat_schema = resolve(schema)
-    flat_schema.pop("$defs", None)
-    flat_schema.pop("definitions", None)
     return flat_schema
 
 class GeminiProvider(LLMProvider):
@@ -46,7 +58,6 @@ class GeminiProvider(LLMProvider):
     """
     def __init__(self, model_id: str, config: dict):
         super().__init__(model_id, config)
-        # Accept API key from custom configuration or general environment variables
         self.api_key = (
             config.get("api_key") 
             or os.getenv("OPENAI_API_KEY") 
@@ -56,7 +67,6 @@ class GeminiProvider(LLMProvider):
         if not self.api_key:
             raise GeminiProviderError("Gemini API key is missing. Please set OPENAI_API_KEY or GEMINI_API_KEY.")
             
-        # Standardize Gemini model naming
         self.api_model = model_id
         if not self.api_model.startswith("models/"):
             self.api_model = f"models/{self.api_model}"
@@ -72,9 +82,9 @@ class GeminiProvider(LLMProvider):
         url = f"https://generativelanguage.googleapis.com/v1beta/{self.api_model}:generateContent?key={self.api_key}"
         headers = {"Content-Type": "application/json"}
         
-        # Generate JSON schema and dereference it to avoid $ref errors in Gemini
+        # Generate and sanitize JSON schema
         raw_schema = schema.model_json_schema()
-        json_schema = dereference_schema(raw_schema)
+        json_schema = clean_and_dereference_schema(raw_schema)
         
         data = {
             "contents": [
