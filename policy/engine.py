@@ -15,7 +15,7 @@ class PolicyEngine:
     def __init__(self, rules: list) -> None:
         self.rules = rules or []
 
-    def evaluate(self, recommendation: RecommendationV1) -> PolicyValidationResult:
+    def evaluate(self, recommendation: RecommendationV1, context: Any = None) -> PolicyValidationResult:
         """
         Evaluates a recommendation against the deterministic rules.
         Runs all rules (aggregate evaluation) and returns a PolicyValidationResult.
@@ -30,7 +30,7 @@ class PolicyEngine:
             rule_name = getattr(rule, "name", rule.__class__.__name__)
             try:
                 # Call evaluate exactly matching the legacy rule interface signature
-                result = rule.evaluate(recommendation, None)
+                result = rule.evaluate(recommendation, context)
                 
                 # If result is False or contains violation strings, it fails.
                 # If it returns True, None, or an empty list, it passes.
