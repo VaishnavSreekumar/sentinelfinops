@@ -18,5 +18,8 @@ class LLMProviderFactory:
         elif provider_name.lower() == "openai":
             from ai.providers.openai import OpenAIProvider
             return OpenAIProvider(model_id=model_id, config=config)
+        elif provider_name.lower() == "gemini":
+            from ai.providers.gemini import GeminiProvider
+            return GeminiProvider(model_id=model_id, config=config)
         
         raise ValueError(f"Unknown LLM provider name: '{provider_name}'")
