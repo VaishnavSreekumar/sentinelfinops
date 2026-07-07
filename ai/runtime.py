@@ -190,7 +190,7 @@ def create_ai_runtime(config: Optional[dict] = None) -> AIRuntime:
     # 4. Build gateway, validator, policy engine, and telemetry tracker
     gateway = AIGateway(provider=provider, prompt_registry=prompt_registry)
     schema_validator = SchemaValidator()
-    policy_engine = PolicyEngine(rules=[ProductionGuardRule()])
+    policy_engine = PolicyEngine(rules=[ProductionGuardRule(cfg)])
     telemetry_tracker = TelemetryTracker()
 
     return AIRuntime(
